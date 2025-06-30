@@ -115,6 +115,8 @@ The Chatter interface provides interactive widgets for exploring, editing, and e
 - **Export Bouts:**  
   Save all detected bouts as separate audio files and appends bout metadata to chatter.bouts_df
 
+### Plot
+- The X axis is Time(s) incremeted and marked every second with minor increments for every 0.1 seconds to assist in pinpointing bout start and end times
 ---
 
 ## How to Use
