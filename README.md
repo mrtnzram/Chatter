@@ -79,7 +79,7 @@ The Chatter interface provides interactive widgets for exploring, editing, and e
 ## How to Use
 
 1. **Specify Recording Directory**
-   In the second cell in the notebook, specify where your recordings are to create the initial dataframe. The script follows the naming convention: `Genus-species-birdid.wav' for extracting the respective bird metadata.
+   In the second cell in the notebook, specify where your recordings are to create the initial dataframe. The script follows the naming convention: `Genus-species-birdid.wav` for extracting the respective bird metadata.
 
 3. **Select a Bird:**  
    Use the dropdown to choose a bird/song.
