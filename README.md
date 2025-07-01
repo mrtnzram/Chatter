@@ -19,10 +19,83 @@ pip`
 
 ## The Process 
 
-Chatter mainly uses librosa's audio extracting features paired with computational techniques and an optional machine learning stage to detect bouts. This process for detecting bouts in audio signals begins with detecting active regions using spectral flux. Spectral flux is the measure of rate of change in the power spectrum between successive frames. Peaks in spectral flux often correspond to potential active regions. Next, MFCC coefficients pattern recognition is applied to refine these regions further. Mel-Frequency Cepstral Coefficients (MFCCs), which represent the short-term power spectrum of the audio, are extracted and analyzed. When a pattern of atleast three frames is repeated twice, Chatter detects this as a potential active region aswell These identified active regions are then refined by combining RMS energy and MFCC coefficients. This step involves applying thresholds to discard regions with low RMS energy or inconsistent MFCC patterns that may be the product of noise. The result of this stage is a set of potential bouts, which are segments likely to contain the target signals. An optional machine learning model classifier can be used to further validate and classify the detected bouts (currently not provided with chatter). Following this, using the interactive widgets, users are able to refine the onset and offsets of these detected bouts, aswell as remove errors and add undetected bouts.
+Chatter mainly uses librosa's audio extracting features paired with computational techniques and an optional machine learning stage to detect bouts. This process for detecting bouts in audio signals begins with detecting active regions using spectral flux. Spectral flux is the measure of rate of change in the power spectrum between successive frames. Peaks in spectral flux often correspond to potential active regions. Next, MFCC coefficients pattern recognition is applied to refine these regions further. Mel-Frequency Cepstral Coefficients (MFCCs), which represent the short-term power spectrum of the audio, are extracted and analyzed. When a pattern of atleast three frames is repeated twice, Chatter detects this as a potential active region aswell These identified active regions are then refined by combining RMS energy and MFCC coefficients. This step involves applying thresholds to discard regions with low RMS energy or inconsistent MFCC patterns that may be the product of noise. The result of this stage is a set of potential bouts, which are segments likely to contain the target signals. An optional machine learning model classifier can be used to further validate and classify the detected bouts. Following this, using the interactive widgets, users are able to refine the onset and offsets of these detected bouts, aswell as remove errors and add undetected bouts.
 
 ![Chatterprocess](https://github.com/mrtnzram/Chatter/blob/master/Chatterprocess.png)
 
+---
+# Chatter Widget Features & Usage Guide
+
+## Overview
+
+The Chatter interface provides interactive widgets for exploring, editing, and exporting detected song bouts from your dataset. Below is a quick reference for each widget and button.
+
+---
+
+## Widget Features
+
+### Bird Selection
+- **Dropdown:**  
+  Selects which bird/song to display and edit.
+
+### Parameter Controls
+- **MFCC Thresh:**  
+  Minimum variance in MFCCs for a frame to be considered active.
+- **Energy Thresh:**  
+  Minimum RMS energy (as a fraction of max) for a frame to be considered active.
+- **Active Region Thresh:**  
+  Minimum spectral flux (as a fraction of max) for a frame to be considered active.
+- **Min Silence:**  
+  Minimum silence (in seconds) to separate two bouts.
+- **Min Bout Len:**  
+  Minimum duration (in seconds) for a detected bout.
+- **Pad:**  
+  Padding (in seconds) before and after each detected bout.
+
+### Bout Selection & Editing
+- **Bouts (SelectMultiple):**  
+  Select one or more bouts for removal or editing.
+- **Mark as Not Outlier**
+  Unmark false outlier flags.
+- **Onset/Offset:**  
+  Edit the start and end time (in seconds) for a selected bout.
+- **Update Bout:**  
+  Save changes to the onset/offset of the selected bout.
+- **Add Bout:**  
+  Add a new bout using the current onset/offset values.
+- **Remove Bouts:**  
+  Remove the selected bouts from the list.
+
+### Actions
+- **Finalize Parameters:**  
+  Apply and save the current parameter settings for the selected bird/song and update the df dataframe with the new audio feature values. (You will not need to press this button if you are keeping the parameters default)
+- **Export Bouts:**  
+  Save all detected bouts as separate audio files and appends bout metadata to chatter.bouts_df
+
+### Plot
+- The X axis is Time(s) incremeted and marked every second with minor increments for every 0.1 seconds to assist in pinpointing bout start and end times
+---
+
+## How to Use
+
+1. **Specify Recording Directory**
+   In the second cell in the notebook, specify where your recordings are to create the initial dataframe. The script follows the naming convention: `Genus-species-birdid.wav' for extracting the respective bird metadata.
+
+3. **Select a Bird:**  
+   Use the dropdown to choose a bird/song.
+
+4. **Adjust Parameters:**  
+   Modify detection parameters as needed. The plot and detected bouts will update automatically. (The default parameters should work well for most use cases)
+
+5. **Edit Bouts:**  
+   - Select a bout to edit its onset/offset, then click **Update Bout**.
+   - If a bout is marked as an outlier even tho it is not, then click **Mark as Not Outlier**
+   - To add a new bout, set onset/offset and click **Add Bout**.
+   - To remove bouts, select one or multiple and click **Remove Bouts**.
+
+6. **Finalize & Export:**  
+   - Click **Finalize Parameters** to save settings for the current bird.
+   - Click **Export Bouts** to save all bouts and append it to the chatter.bouts_df and export the audio clips.
 ---
 
 ## AudioFeatureExtractor Parameters
@@ -74,76 +147,15 @@ Chatter mainly uses librosa's audio extracting features paired with computationa
 
 - **model**  
   *default: None*  
-  Optional classifier model for post-processing or classification of bouts. If you have an existing model that detects outliers (human speech) among the detected bouts, this may be useful.
+  Optional classifier model for post-processing or classification of bouts. Takes your models path. If you have an existing model that detects outliers (human speech) among the detected bouts, this may be useful.
 
+- **use_birdnet**
+  *default: False*
+  Optional clasifier model [BirdNEt](https://birdnet.cornell.edu/) which utilizes bird recognition to detect outlier bouts
 
-# Chatter Widget Features & Usage Guide
-
-## Overview
-
-The Chatter interface provides interactive widgets for exploring, editing, and exporting detected song bouts from your dataset. Below is a quick reference for each widget and button.
-
----
-
-## Widget Features
-
-### Bird Selection
-- **Dropdown:**  
-  Selects which bird/song to display and edit.
-
-### Parameter Controls
-- **MFCC Thresh:**  
-  Minimum variance in MFCCs for a frame to be considered active.
-- **Energy Thresh:**  
-  Minimum RMS energy (as a fraction of max) for a frame to be considered active.
-- **Active Region Thresh:**  
-  Minimum spectral flux (as a fraction of max) for a frame to be considered active.
-- **Min Silence:**  
-  Minimum silence (in seconds) to separate two bouts.
-- **Min Bout Len:**  
-  Minimum duration (in seconds) for a detected bout.
-- **Pad:**  
-  Padding (in seconds) before and after each detected bout.
-
-### Bout Selection & Editing
-- **Bouts (SelectMultiple):**  
-  Select one or more bouts for removal or editing.
-- **Onset/Offset:**  
-  Edit the start and end time (in seconds) for a selected bout.
-- **Update Bout:**  
-  Save changes to the onset/offset of the selected bout.
-- **Add Bout:**  
-  Add a new bout using the current onset/offset values.
-- **Remove Bouts:**  
-  Remove the selected bouts from the list.
-
-### Actions
-- **Finalize Parameters:**  
-  Apply and save the current parameter settings for the selected bird/song and update the df dataframe with the new audio feature values. (You will not need to press this button if you are keeping the parameters default)
-- **Export Bouts:**  
-  Save all detected bouts as separate audio files and appends bout metadata to chatter.bouts_df
-
-### Plot
-- The X axis is Time(s) incremeted and marked every second with minor increments for every 0.1 seconds to assist in pinpointing bout start and end times
----
-
-## How to Use
-
-1. **Select a Bird:**  
-   Use the dropdown to choose a bird/song.
-
-2. **Adjust Parameters:**  
-   Modify detection parameters as needed. The plot and detected bouts will update automatically. (The default parameters should work well for most use cases)
-
-3. **Edit Bouts:**  
-   - Select a bout to edit its onset/offset, then click **Update Bout**.
-   - To add a new bout, set onset/offset and click **Add Bout**.
-   - To remove bouts, select one or multiple and click **Remove Bouts**.
-
-4. **Finalize & Export:**  
-   - Click **Finalize Parameters** to save settings for the current bird.
-   - Click **Export Bouts** to save all bouts and append it to the chatter.bouts_df and export the audio clips.
----
+- **birdnet_model_path**
+  *default: None*
+  When use_birdnet = True, make sure to direct the program to where Birdnet is located on your device.
 
 # DataFrames in Chatter
 
