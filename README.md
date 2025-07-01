@@ -13,13 +13,13 @@ pip`
 5) Activate environment: `conda activate env_name`
 6) Install interactive widget dependencies: `conda install -c conda-forge ipympl jupyterlab`
 7) If Jupyter is not already installed, install Jupyter: `pip install jupyter`
-8) Install the dependencies using: pip install -r requirements.txt
+8) Install the dependencies using: `pip install -r requirements.txt`
 9) Run Jupyter lab: `jupyter lab`
 10) Open Chatter.ipynb
 
 ## The Process 
 
-Chatter mainly uses librosa's audio extracting features paired with computational techniques and an optional machine learning stage to detect bouts. This process for detecting bouts in audio signals begins with detecting active regions using spectral flux. Spectral flux is the measure of rate of change in the power spectrum between successive frames. Peaks in spectral flux often correspond to potential active regions. Next, MFCC coefficients pattern recognition is applied to refine these regions further. Mel-Frequency Cepstral Coefficients (MFCCs), which represent the short-term power spectrum of the audio, are extracted and analyzed. When a pattern of atleast three frames is repeated twice, Chatter detects this as a potential active region aswell These identified active regions are then refined by combining RMS energy and MFCC coefficients. This step involves applying thresholds to discard regions with low RMS energy or inconsistent MFCC patterns that may be the product of noise. The result of this stage is a set of potential bouts, which are segments likely to contain the target signals. An optional machine learning model classifier can be used to further validate and classify the detected bouts. Following this, using the interactive widgets, users are able to refine the onset and offsets of these detected bouts, aswell as remove errors and add undetected bouts.
+Chatter mainly uses librosa's audio extracting features paired with computational techniques and an optional machine learning stage (using your own model or [BirdNet](https://birdnet.cornell.edu/) to detect bouts. This process for detecting bouts in audio signals begins with detecting active regions using spectral flux. Spectral flux is the measure of rate of change in the power spectrum between successive frames. Peaks in spectral flux often correspond to potential active regions. Next, MFCC coefficients pattern recognition is applied to refine these regions further. Mel-Frequency Cepstral Coefficients (MFCCs), which represent the short-term power spectrum of the audio, are extracted and analyzed. When a pattern of atleast three frames is repeated twice, Chatter detects this as a potential active region aswell These identified active regions are then refined by combining RMS energy and MFCC coefficients. This step involves applying thresholds to discard regions with low RMS energy or inconsistent MFCC patterns that may be the product of noise. The result of this stage is a set of potential bouts, which are segments likely to contain the target signals. An optional machine learning model classifier can be used to further validate and classify the detected bouts. Following this, using the interactive widgets, users are able to refine the onset and offsets of these detected bouts, aswell as remove errors and add undetected bouts.
 
 ![Chatterprocess](https://github.com/mrtnzram/Chatter/blob/master/Chatterprocess.png)
 
@@ -101,21 +101,29 @@ The Chatter interface provides interactive widgets for exploring, editing, and e
 ## AudioFeatureExtractor Parameters
 
 - **sr**  
+
   *default: 22050*  
+
   The target sampling rate for audio loading.  
   All audio files will be resampled to this rate.
 
 - **n_mfcc**  
+
   *default: 13*  
+
   Number of Mel-frequency cepstral coefficients (MFCCs) to compute for each frame.
 
 - **hop_length**  
+
   *default: 512*  
+
   Number of samples between successive frames for all frame-based calculations.  
   Controls the time resolution of features.
 
 - **frame_length**  
+
   *default: 2048*  
+
   Number of samples per analysis frame for energy and spectral calculations.
 
 - **mfcc_threshold**  
@@ -124,39 +132,53 @@ The Chatter interface provides interactive widgets for exploring, editing, and e
   Used in refining active regions.
 
 - **energy_threshold_pct**  
-  *float, default: 0.02*  
+
+  *default: 0.02*  
+
   The minimum RMS energy required for a frame to be considered active,  
   expressed as a fraction of the maximum RMS energy.
 
 - **min_silence**  
+
   *default: 0.8*  
+
   Minimum duration of silence (in seconds) required to separate two bouts.  
   Shorter silences will be merged into a single bout.
 
 - **pad**  
+
   *default: 0.75*  
+
   Amount of time (in seconds) to pad around detected bouts before the onset and after the offset of each detected bout for exporting as wav files.
 
 - **active_region_threshold_pct**  
+
   *default: 0.001*  
+
   The minimum spectral flux (as a fraction of the maximum) required for a frame to be considered active.
 
 - **min_bout_length**  
+
   *default: 1.0*  
+
   Minimum duration (in seconds) for a detected bout to be kept.
 
-- **model**  
-  *default: None*  
+- **model**
+    
+  *default: None*
+ 
   Optional classifier model for post-processing or classification of bouts. Takes your models path. If you have an existing model that detects outliers (human speech) among the detected bouts, this may be useful.
 
 - **use_birdnet**
+
   *default: False*
-  
+
   Optional clasifier model [BirdNEt](https://birdnet.cornell.edu/) which utilizes bird recognition to detect outlier bouts
 
 - **birdnet_model_path**
+
   *default: None*
-  
+
   When use_birdnet = True, make sure to direct the program to where Birdnet is located on your device.
 
 # DataFrames in Chatter
