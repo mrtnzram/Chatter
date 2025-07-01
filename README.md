@@ -21,7 +21,7 @@ pip`
 
 Chatter mainly uses librosa's audio extracting features paired with computational techniques and an optional machine learning stage to detect bouts. This process for detecting bouts in audio signals begins with detecting active regions using spectral flux. Spectral flux is the measure of rate of change in the power spectrum between successive frames. Peaks in spectral flux often correspond to potential active regions. Next, MFCC coefficients pattern recognition is applied to refine these regions further. Mel-Frequency Cepstral Coefficients (MFCCs), which represent the short-term power spectrum of the audio, are extracted and analyzed. When a pattern of atleast three frames is repeated twice, Chatter detects this as a potential active region aswell These identified active regions are then refined by combining RMS energy and MFCC coefficients. This step involves applying thresholds to discard regions with low RMS energy or inconsistent MFCC patterns that may be the product of noise. The result of this stage is a set of potential bouts, which are segments likely to contain the target signals. An optional machine learning model classifier can be used to further validate and classify the detected bouts (currently not provided with chatter). Following this, using the interactive widgets, users are able to refine the onset and offsets of these detected bouts, aswell as remove errors and add undetected bouts.
 
-![Chatterprocess]()
+![Chatterprocess](https://github.com/mrtnzram/Chatter/blob/master/Chatterprocess.png)
 
 ---
 
