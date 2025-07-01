@@ -240,11 +240,6 @@ class Chatter:
     
             # Load parameters for the selected bird
             self._load_params_for_bird(change['new'])
-    
-            # Update only if the selected bird is different
-            if self.current_row_idx != change['new']:
-                self._draw_base_and_overlay(change['new'])
-                self.current_row_idx = change['new']
 
 
     def _on_finalize_clicked(self, b):
