@@ -3,7 +3,7 @@
 Semi-automatic bout segmentation from bird song recordings using acoustic features such as Spectral Flux, Energy, and MFCC coefficients.
 
 ## Getting Started
-To get Nester started on your device, follow the installation steps below and refer to the [Chatter Manual](https://github.com/mrtnzram/Chatter). *(work in progress)*
+To get Nester started on your device, follow the installation steps below.
 
 1) Open terminal/powershell.
 2) Set path to directory where you want to clone the directory: `cd filepath`
@@ -185,6 +185,6 @@ This DataFrame is created when you export bouts (e.g., with the "Export Bouts" b
 
 ## Notes
 
-- I recommend using 30 to 1 minute song recordings, anything longer makes processing take longer when updating bouts and/or selecting new bird recordings.
+- I recommend using 30 second to 1 minute song recordings, anything longer makes processing take longer when updating bouts and/or selecting new bird recordings.
 - The spectrogram and overlays update automatically with parameter changes.
 - All edits are reflected in the current session and can be exported at any time.
