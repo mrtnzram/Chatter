@@ -324,4 +324,3 @@ class AudioFeatureExtractor:
                 rec.analyze()
                 # If any bird species detected, not an outlier
                 birdnet_flags[i] = len(rec.detections) > 0
-        return birdnet_flags
