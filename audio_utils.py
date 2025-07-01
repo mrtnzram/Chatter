@@ -7,6 +7,13 @@ from scipy.signal import butter, filtfilt
 from sklearn.metrics.pairwise import cosine_distances
 from itertools import groupby
 from operator import itemgetter
+import tempfile
+import soundfile as sf
+try:
+    from birdnetlib import Recording, Model
+except ImportError:
+    Recording = None
+    Model = None
 
 def create_initial_dataset(root_dir):
     data = []
@@ -59,7 +66,9 @@ class AudioFeatureExtractor:
         pad=0.75,
         active_region_threshold_pct=0.05,  # e.g., 15% of max flux
         min_bout_length=1.0,
-        model = None
+        model = None,
+        use_birdnet=False,
+        birdnet_model_path=None
     ):
         self.sr = sr
         self.n_mfcc = n_mfcc
@@ -75,6 +84,12 @@ class AudioFeatureExtractor:
         self.model = None
         if model:
             self.load_model(model)
+        
+        self.use_birdnet = use_birdnet
+        if use_birdnet and Model is not None and birdnet_model_path is not None:
+            self.birdnet_model = Model(model_path=birdnet_model_path)
+        else:
+            self.birdnet_model = None
 
     def load_model(self, model_path):
         """Load the model from the given file path."""
@@ -272,6 +287,11 @@ class AudioFeatureExtractor:
         # Attach outlier flag to each bout
         for bout, flag in zip(bouts, outlier_flags):
             bout['outlier_flag'] = int(flag)
+        # BirdNET: only run on non-outlier bouts
+        if getattr(self, "use_birdnet", False) and self.birdnet_model is not None and len(bouts) > 0:
+            birdnet_flags = self.classify_bouts_with_birdnet(audio, sr, bouts, outlier_flags)
+            for bout, birdnet_flag in zip(bouts, birdnet_flags):
+                bout['birdnet_flag'] = int(birdnet_flag) if birdnet_flag is not None else None
         return pd.Series({
             'audio': audio,
             'sr': sr,
@@ -284,37 +304,24 @@ class AudioFeatureExtractor:
             'bouts': bouts
         })
 
-def plot_spectrogram_base(S_db, sr, duration, species, bird_id):
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(max(duration / (5/2), 15), 4))
-    img = librosa.display.specshow(S_db, sr=sr, x_axis='time', y_axis='hz', cmap='magma', ax=ax)
-    ax.set_xticks(np.arange(0, duration + 1, 1))
-    ax.set_xticklabels([f"{x:.0f}" for x in np.arange(0, duration + 1, 1)])
-    plt.title(f"Spectrogram ({species} {bird_id})")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Frequency (Hz)")
-    plt.colorbar(img, format='%+2.0f dB')
-    plt.tight_layout()
-    return fig, ax
-
-def plot_bout_overlays(ax, bouts, outlier_flags, S_db):
-    for i, bout in enumerate(bouts):
-        onset = bout['onset']
-        offset = bout['offset']
-        is_outlier = outlier_flags[i] if len(outlier_flags) == len(bouts) else 0
-        color = 'red' if is_outlier else 'green'
-        alpha = 0.3 if is_outlier else 0.15
-        ax.axvspan(onset, offset, color=color, alpha=alpha)
-        ax.axvline(onset, color=color if is_outlier else 'green', linestyle='--')
-        ax.axvline(offset, color='blue', linestyle='--')
-        ax.text(onset, S_db.shape[0] * 5, f'{onset:.2f}s', color='white', rotation=90, va='bottom', ha='right', fontsize=9)
-        ax.text(offset, S_db.shape[0] * 5, f'{offset:.2f}s', color='white', rotation=90, va='bottom', ha='left', fontsize=9)
-    for i in range(1, len(bouts)):
-        prev_offset = bouts[i - 1]['offset']
-        curr_onset = bouts[i]['onset']
-        y_bracket = S_db.shape[0] * 0.85
-        ax.plot([prev_offset, curr_onset], [y_bracket, y_bracket], color='white', linewidth=2)
-        ax.plot([prev_offset, prev_offset], [y_bracket - 5, y_bracket + 5], color='white', linewidth=2)
-        ax.plot([curr_onset, curr_onset], [y_bracket - 5, y_bracket + 5], color='white', linewidth=2)
-        interval = curr_onset - prev_offset
-        ax.text((prev_offset + curr_onset) / 2, y_bracket + 5, f"{interval:.2f}s", color='white', ha='center', va='bottom', fontsize=10)
+    def classify_bouts_with_birdnet(self, audio, sr, bouts, outlier_flags):
+        """Classify only non-outlier bouts using BirdNET."""
+        if self.birdnet_model is None or Recording is None:
+            return [None] * len(bouts)
+        birdnet_flags = [None] * len(bouts)
+        for i, (bout, is_outlier) in enumerate(zip(bouts, outlier_flags)):
+            if is_outlier:
+                birdnet_flags[i] = False  # Already an outlier, skip BirdNET
+                continue
+            # Extract bout audio
+            start_sample = int(bout['wavstart'] * sr)
+            end_sample = int(bout['wavend'] * sr)
+            bout_audio = audio[start_sample:end_sample]
+            # Save to temp file for BirdNET
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmp_wav:
+                sf.write(tmp_wav.name, bout_audio, sr)
+                rec = Recording(tmp_wav.name, self.birdnet_model)
+                rec.analyze()
+                # If any bird species detected, not an outlier
+                birdnet_flags[i] = len(rec.detections) > 0
+        return birdnet_flags

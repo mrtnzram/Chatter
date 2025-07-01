@@ -188,7 +188,7 @@ def plot_bout_overlays(ax, bouts, outlier_flags, S_db, show_scroll=True):
         onset = bout['onset']
         offset = bout['offset']
         is_outlier = outlier_flags[i] if len(outlier_flags) == len(bouts) else 0
-        color = 'green'
+        color = 'red' if is_outlier else 'green'
         alpha = 0.3 if is_outlier else 0.15
         ax.axvspan(onset, offset, color=color, alpha=alpha)
         ax.axvline(onset, color=color, linestyle='--')
