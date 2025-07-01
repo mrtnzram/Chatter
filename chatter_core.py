@@ -83,6 +83,9 @@ class Chatter:
         self.finalize_btn.on_click(self._on_finalize_clicked)
         self.save_bouts_btn.on_click(self._on_save_bouts_clicked)
         self.remove_bouts_btn.on_click(self._on_remove_bouts_clicked)
+        self.not_outlier_btn = widgets.Button(description="Mark as Not Outlier", button_style='primary', layout=widgets.Layout(width='200px'))
+        self.output_not_outlier = widgets.Output()
+        self.not_outlier_btn.on_click(self._on_not_outlier_clicked)
         self.bout_select.observe(self._on_bout_select_change, names='value')
         self.update_bout_btn.on_click(self._on_update_bout_clicked)
         self.add_bout_btn.on_click(self.on_add_bout_clicked)
@@ -109,9 +112,6 @@ class Chatter:
                 'pad_val': self.pad
             }
         )
-
-        # Display the first bird by default
-        self._draw_base_and_overlay(self.dropdown.value)
 
     def _draw_base_and_overlay(self, idx):
         row = self.df.iloc[idx].copy()
@@ -330,6 +330,34 @@ class Chatter:
             self.pad.value
         )
 
+    def _on_not_outlier_clicked(self, b):
+        idx = self.dropdown.value
+        bouts = self.current_bouts.get(idx, [])
+        selected = list(self.bout_select.value)
+        changed = []
+        for i in selected:
+            if i < len(bouts):
+                bouts[i]['outlier_flag'] = 0
+                changed.append(i)
+        self.df.at[idx, 'bouts'] = bouts
+        self.current_bouts[idx] = bouts
+        with self.output_not_outlier:
+            clear_output()
+            if changed:
+                print(f"Marked bouts as not outliers: {changed}")
+            else:
+                print("No bouts selected.")
+        # Redraw plot to update colors
+        self.update_plot(
+            idx,
+            self.mfcc_threshold.value,
+            self.energy_threshold.value,
+            self.active_region_thresh.value,
+            self.min_silence.value,
+            self.min_bout_len.value,
+            self.pad.value
+        )
+
     def _on_bout_select_change(self, change):
         idx = self.dropdown.value
         bouts = self.current_bouts.get(idx, [])
@@ -432,12 +460,12 @@ class Chatter:
         row3 = widgets.HBox([self.min_silence, self.min_bout_len, self.pad], layout=widgets.Layout(margin='10px'))
         row4 = widgets.HBox([self.finalize_btn, self.save_bouts_btn], layout=widgets.Layout(margin='10px', justify_content='center', align_items='center'))
 
-        row_bout_select = widgets.HBox([self.bout_select, self.remove_bouts_btn], layout=widgets.Layout(margin='10px'))
+        row_bout_select = widgets.HBox([self.bout_select, self.remove_bouts_btn,self.not_outlier_btn], layout=widgets.Layout(margin='10px'))
         row_bout_edit = widgets.HBox([self.onset_box, self.offset_box, self.update_bout_btn,self.add_bout_btn], layout=widgets.Layout(margin='10px'))
 
         ui = widgets.VBox([
             row1, row2, row3, row_bout_select, row_bout_edit, row4,
-            self.output_update_bout, self.output_remove_bouts, self.output_finalize, self.output_save_bouts,
+            self.output_update_bout, self.output_remove_bouts, self.output_not_outlier, self.output_finalize,self.output_save_bouts,
             self.plot_output
         ], layout=widgets.Layout(margin='20px'))
 
