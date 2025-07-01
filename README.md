@@ -151,10 +151,12 @@ The Chatter interface provides interactive widgets for exploring, editing, and e
 
 - **use_birdnet**
   *default: False*
+  
   Optional clasifier model [BirdNEt](https://birdnet.cornell.edu/) which utilizes bird recognition to detect outlier bouts
 
 - **birdnet_model_path**
   *default: None*
+  
   When use_birdnet = True, make sure to direct the program to where Birdnet is located on your device.
 
 # DataFrames in Chatter
