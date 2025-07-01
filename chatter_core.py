@@ -113,6 +113,8 @@ class Chatter:
             }
         )
 
+        self.bouts_df = pd.DataFrame()
+
     def _draw_base_and_overlay(self, idx):
         row = self.df.iloc[idx].copy()
         # Use cached spectrogram
@@ -266,46 +268,49 @@ class Chatter:
             print(f"Parameters and features finalized for {self.df.loc[idx, 'species']} {self.df.loc[idx, 'bird_id']}")
 
     def _on_save_bouts_clicked(self, b):
+        idx = self.dropdown.value
+        row = self.df.iloc[idx]
+        prev_offset = None
+        audio, sr = row['audio'], row['sr']
         bout_rows = []
-        save_dir = "bouts_audio"
-        os.makedirs(save_dir, exist_ok=True)
-        for idx, row in self.df.iterrows():
-            prev_offset = None
-            audio, sr = row['audio'], row['sr']
-            for bout_id, bout in enumerate(row['bouts']):
-                onset = bout['onset']
-                offset = bout['offset']
-                wavstart = bout['wavstart']
-                wavend = bout['wavend']
-                if bout_id == 0:
-                    intersong = None
-                else:
-                    intersong = onset - prev_offset
-                duration = offset - onset
-                bout_audio = audio[int(wavstart * sr):int(wavend * sr)]
-                bout_filename = f"{row['species']}_{row['bird_id']}_bout{bout_id}.wav"
-                bout_path = os.path.join(save_dir, bout_filename)
-                import soundfile as sf
-                sf.write(bout_path, bout_audio, sr)
-                bout_rows.append({
-                    'species': row['species'],
-                    'bird_id': row['bird_id'],
-                    'wav_location': row['wav_location'],
-                    'song_id': row['song_id'],
-                    'bout_id': bout_id,
-                    'duration': duration,
-                    'onset': onset,
-                    'offset': offset,
-                    'wavstart': wavstart,
-                    'wavend': wavend,
-                    'intersong_interval': intersong,
-                    'bout_wav': bout_path
-                })
-                prev_offset = offset
-        self.bouts_df = pd.DataFrame(bout_rows)
+        for bout_id, bout in enumerate(row['bouts']):
+            onset = bout['onset']
+            offset = bout['offset']
+            wavstart = bout['wavstart']
+            wavend = bout['wavend']
+            if bout_id == 0:
+                intersong = None
+            else:
+                intersong = onset - prev_offset
+            duration = offset - onset
+            bout_audio = audio[int(wavstart * sr):int(wavend * sr)]
+            bout_filename = f"{row['species']}_{row['bird_id']}_bout{bout_id}.wav"
+            bout_path = os.path.join("bouts_audio", bout_filename)
+            import soundfile as sf
+            os.makedirs("bouts_audio", exist_ok=True)
+            sf.write(bout_path, bout_audio, sr)
+            bout_rows.append({
+                'species': row['species'],
+                'bird_id': row['bird_id'],
+                'wav_location': row['wav_location'],
+                'song_id': row['song_id'],
+                'bout_id': bout_id,
+                'duration': duration,
+                'onset': onset,
+                'offset': offset,
+                'wavstart': wavstart,
+                'wavend': wavend,
+                'intersong_interval': intersong,
+                'bout_wav': bout_path
+            })
+            prev_offset = offset
+        # Append to self.bouts_df
+        if bout_rows:
+            new_bouts_df = pd.DataFrame(bout_rows)
+            self.bouts_df = pd.concat([self.bouts_df, new_bouts_df], ignore_index=True)
         with self.output_save_bouts:
             clear_output()
-            print(f"Audio files saved to {save_dir}")
+            print(f"Exported {len(bout_rows)} bouts for {row['species']} {row['bird_id']} and appended to bouts_df.")
 
     def _on_remove_bouts_clicked(self, b):
         idx = self.dropdown.value
