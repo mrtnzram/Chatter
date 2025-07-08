@@ -187,6 +187,7 @@ def plot_bout_overlays(ax, bouts, outlier_flags, S_db, show_scroll=True):
     for i, bout in enumerate(bouts):
         onset = bout['onset']
         offset = bout['offset']
+        bout_number = i
         is_outlier = outlier_flags[i] if len(outlier_flags) == len(bouts) else 0
         color = 'red' if is_outlier else 'green'
         alpha = 0.3 if is_outlier else 0.15
@@ -194,6 +195,7 @@ def plot_bout_overlays(ax, bouts, outlier_flags, S_db, show_scroll=True):
         ax.axvline(onset, color=color, linestyle='--')
         ax.axvline(offset, color='blue', linestyle='--')
         ax.text(onset, S_db.shape[0] * 5, f'{onset:.2f}s', color='white', rotation=90, va='bottom', ha='right', fontsize=9)
+        ax.text(onset, S_db.shape[0] * 8, f'Bout {bout_number}', color='white',rotation=90, va='bottom', ha='right', fontsize=9, fontweight='bold')
         ax.text(offset, S_db.shape[0] * 5, f'{offset:.2f}s', color='white', rotation=90, va='bottom', ha='left', fontsize=9)
 
     for i in range(1, len(bouts)):
