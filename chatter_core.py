@@ -358,6 +358,8 @@ class Chatter:
             self.min_silence.value,
             self.min_bout_len.value,
             self.pad.value
+            self.zoom_slider.value,          
+            self.minor_tick_step.value       
         )
 
     def _on_not_outlier_clicked(self, b):
@@ -386,6 +388,8 @@ class Chatter:
             self.min_silence.value,
             self.min_bout_len.value,
             self.pad.value
+            self.zoom_slider.value,          # ← NEW
+            self.minor_tick_step.value       # ← NEW
         )
 
     def _on_bout_select_change(self, change):
@@ -441,6 +445,8 @@ class Chatter:
                 self.min_silence.value,
                 self.min_bout_len.value,
                 self.pad.value
+                self.zoom_slider.value,          
+                self.minor_tick_step.value       
             )
 
     def on_add_bout_clicked(self, b):
@@ -481,6 +487,8 @@ class Chatter:
             self.min_silence.value,
             self.min_bout_len.value,
             self.pad.value,
+            self.zoom_slider.value,          
+            self.minor_tick_step.value      
         )
 
 
