@@ -104,7 +104,7 @@ def plot_spectrogram_with_bouts(row):
     fig, ax = plt.subplots(figsize=(width_inch, 4))
     S = librosa.stft(audio)
     S_db = librosa.amplitude_to_db(np.abs(S), ref=np.max)
-    img = librosa.display.specshow(S_db, sr=sr, x_axis='time', y_axis='hz', cmap='magma', ax=ax)
+    img = librosa.display.specshow(S_db, sr=sr, x_axis='time', y_axis='hz', cmap='greys', ax=ax)
 
     for i, bout in enumerate(bouts):
         onset = bout['onset']
@@ -151,26 +151,26 @@ def plot_spectrogram_with_bouts(row):
     """
     display(HTML(html))
 
-def plot_spectrogram_base_from_row(row, show_scroll=True):
+def plot_spectrogram_base_from_row(row, show_scroll=True,zoom_factor =1.0, minor_tick_step = 0.1):
     audio = row['audio']
     sr = row['sr']
     species = row.get('species', '')
     bird_id = row.get('bird_id', '')
     duration = len(audio) / sr
-    width_inch = max(duration / (5/7), 15)  # Ensure a minimum width to avoid squishing
+    width_inch = max(duration / (5/7) * zoom_factor, 15)
 
     fig, ax = plt.subplots(figsize=(width_inch, 4))
     S = librosa.stft(audio)
     S_db = librosa.amplitude_to_db(np.abs(S), ref=np.max)
-    img = librosa.display.specshow(S_db, sr=sr, x_axis='time', y_axis='hz', cmap='magma', ax=ax)
+    img = librosa.display.specshow(S_db, sr=sr, x_axis='time', y_axis='hz', cmap='gray', ax=ax)
 
     # Major ticks every 1s with labels
     major_ticks = np.arange(0, duration + 1, 1)
     ax.set_xticks(major_ticks)
     ax.set_xticklabels([f"{x:.0f}" for x in major_ticks])
 
-    # Minor ticks every 0.5s, no labels
-    minor_ticks = np.arange(0, duration + 0.1, 0.1)
+    # ↓  NEW: user‑controlled minor‑tick spacing
+    minor_ticks = np.arange(0, duration + minor_tick_step, minor_tick_step)
     ax.set_xticks(minor_ticks, minor=True)
 
     plt.title(f"Spectrogram with Detected Bouts ({species} {bird_id})",loc = 'left')

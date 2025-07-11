@@ -45,6 +45,20 @@ class Chatter:
         self.min_bout_len = widgets.FloatText(value=1.0, step=0.1, description='Min Bout Len:', style=self.style, layout=self.layout_wide, format='.2f')
         self.pad = widgets.FloatText(value=0.5, step=0.1, description='Pad:', style=self.style, layout=self.layout_wide, format='.2f')
 
+        # --- Visualization Widgets ---
+
+        self.zoom_slider = widgets.FloatSlider(
+            value=1.0, min=0.5, max=3.0, step=0.1,
+            description='Zoom', style=self.style,
+            layout=self.layout_wide, readout_format='.1f'
+        )
+        
+        self.minor_tick_step = widgets.FloatText(
+            value=0.1, step=0.05,
+            description='Minor‑tick increments', style=self.style,
+            layout=self.layout_wide, format='.2f'
+        )
+        
         # --- Bout Selection ---
         self.bout_select = widgets.SelectMultiple(
             options=[],
@@ -109,13 +123,15 @@ class Chatter:
                 'active_region_thresh_val': self.active_region_thresh,
                 'min_silence_val': self.min_silence,
                 'min_bout_len_val': self.min_bout_len,
-                'pad_val': self.pad
+                'pad_val': self.pad,
+                'zoom_val': self.zoom_slider,              
+                'minor_tick_step_val': self.minor_tick_step
             }
         )
 
         self.bouts_df = pd.DataFrame()
 
-    def _draw_base_and_overlay(self, idx):
+    def _draw_base_and_overlay(self, idx,zoom_val,minor_tick_step_val):
         row = self.df.iloc[idx].copy()
         # Use cached spectrogram
         S_db, sr = self.get_cached_spectrogram(idx, row['audio'], row['sr'])
@@ -128,7 +144,11 @@ class Chatter:
             clear_output(wait=True)
             plt.close('all')
             # Draw base spectrogram (do NOT show or close yet)
-            fig, ax, S_db, _ = plot_spectrogram_base_from_row(plot_row, show_scroll=False)
+            fig, ax, S_db, _ = plot_spectrogram_base_from_row(
+                plot_row, show_scroll=False,
+                zoom_factor=self.zoom_slider.value,
+                minor_tick_step=self.minor_tick_step.value
+            )
             # Draw overlays on the same axes
             plot_bout_overlays(
                 ax,
@@ -181,7 +201,8 @@ class Chatter:
             'pad': self.pad.value
         }
 
-    def update_plot(self, idx, mfcc_threshold_val, energy_threshold_val, active_region_thresh_val, min_silence_val, min_bout_len_val, pad_val):
+    def update_plot(self, idx, mfcc_threshold_val, energy_threshold_val, active_region_thresh_val, min_silence_val, min_bout_len_val, pad_val,
+                   zoom_val,minor_tick_step_val):
         self._save_params_for_bird(idx)
         self.extractor.mfcc_threshold = mfcc_threshold_val
         self.extractor.energy_threshold_pct = energy_threshold_val
@@ -217,8 +238,17 @@ class Chatter:
             clear_output(wait=True)
             plt.close('all')
             # Only redraw base if new bird/recording
-            if self.current_row_idx != idx or self.current_ax is None:
-                self._draw_base_and_overlay(idx)
+            # Determine if we need to redraw the spectrogram base
+            zoom_changed = (getattr(self, "_current_zoom", None) != zoom_val)
+            ticks_changed = (getattr(self, "_current_tick", None) != minor_tick_step_val)
+            bird_changed = (self.current_row_idx != idx)
+            no_axes = self.current_ax is None
+            
+            if bird_changed or no_axes or zoom_changed or ticks_changed:
+                self._draw_base_and_overlay(idx, zoom_val, minor_tick_step_val)
+                self._current_zoom = zoom_val
+                self._current_tick = minor_tick_step_val
+                self.current_row_idx = idx  # Make sure we update this too
             else:
                 # Only update overlays dynamically
                 plot_bout_overlays(
@@ -459,6 +489,7 @@ class Chatter:
         row2 = widgets.HBox([self.mfcc_threshold, self.energy_threshold, self.active_region_thresh], layout=widgets.Layout(margin='10px'))
         row3 = widgets.HBox([self.min_silence, self.min_bout_len, self.pad], layout=widgets.Layout(margin='10px'))
         row4 = widgets.HBox([self.finalize_btn, self.save_bouts_btn], layout=widgets.Layout(margin='10px', justify_content='center', align_items='center'))
+        row_zoom = widgets.HBox([self.zoom_slider, self.minor_tick_step],layout=widgets.Layout(margin='10px'))
 
         row_bout_select = widgets.HBox([self.bout_select, self.remove_bouts_btn,self.not_outlier_btn], layout=widgets.Layout(margin='10px'))
         row_bout_edit = widgets.HBox([self.onset_box, self.offset_box, self.update_bout_btn,self.add_bout_btn], layout=widgets.Layout(margin='10px'))
@@ -466,7 +497,8 @@ class Chatter:
         ui = widgets.VBox([
             row1, row2, row3, row_bout_select, row_bout_edit, row4,
             self.output_update_bout, self.output_remove_bouts, self.output_not_outlier, self.output_finalize,self.output_save_bouts,
-            self.plot_output
+            self.plot_output,
+            row_zoom
         ], layout=widgets.Layout(margin='20px'))
 
         display(ui, self.interactive_output)
