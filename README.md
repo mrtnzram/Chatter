@@ -95,7 +95,8 @@ The Chatter interface provides interactive widgets for exploring, editing, and e
 
 6. **Finalize & Export:**  
    - Click **Finalize Parameters** to save settings for the current bird.
-   - Click **Export Bouts** to save all bouts and append it to the chatter.bouts_df and export the audio clips.
+   - Click **Export Bouts** to save all bouts and append it to the chatter.bouts_df and bouts.csv and export the audio clips.
+   - Note: if you have an existing bouts.csv **Export Bouts** will recognize this file as the base for chatter.bouts_df and append the file accordingly. This way you can comeback to your progress anytime.
 ---
 
 ## AudioFeatureExtractor Parameters
