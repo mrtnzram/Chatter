@@ -129,7 +129,11 @@ class Chatter:
             }
         )
 
-        self.bouts_df = pd.DataFrame()
+        # --- Load bouts_df from CSV if exists ---
+        if os.path.exists("bouts.csv"):
+            self.bouts_df = pd.read_csv("bouts.csv")
+        else:
+            self.bouts_df = pd.DataFrame()
 
     def _draw_base_and_overlay(self, idx,zoom_val,minor_tick_step_val):
         row = self.df.iloc[idx].copy()
@@ -333,9 +337,11 @@ class Chatter:
         if bout_rows:
             new_bouts_df = pd.DataFrame(bout_rows)
             self.bouts_df = pd.concat([self.bouts_df, new_bouts_df], ignore_index=True)
+            # Save to CSV every time
+            self.bouts_df.to_csv("bouts.csv", index=False)
         with self.output_save_bouts:
             clear_output()
-            print(f"Exported {len(bout_rows)} bouts for {row['species']} {row['bird_id']} and appended to bouts_df.")
+            print(f"Exported {len(bout_rows)} bouts for {row['species']} {row['bird_id']} and appended to bouts_df. CSV saved.")
 
     def _on_remove_bouts_clicked(self, b):
         idx = self.dropdown.value
@@ -357,7 +363,7 @@ class Chatter:
             self.active_region_thresh.value,
             self.min_silence.value,
             self.min_bout_len.value,
-            self.pad.value
+            self.pad.value,
             self.zoom_slider.value,          
             self.minor_tick_step.value       
         )
@@ -387,7 +393,7 @@ class Chatter:
             self.active_region_thresh.value,
             self.min_silence.value,
             self.min_bout_len.value,
-            self.pad.value
+            self.pad.value,
             self.zoom_slider.value,          # ← NEW
             self.minor_tick_step.value       # ← NEW
         )
@@ -444,7 +450,7 @@ class Chatter:
                 self.active_region_thresh.value,
                 self.min_silence.value,
                 self.min_bout_len.value,
-                self.pad.value
+                self.pad.value,
                 self.zoom_slider.value,          
                 self.minor_tick_step.value       
             )
