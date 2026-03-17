@@ -12,13 +12,6 @@ class Chatter:
         self.spectrogram_cache = {}
         self.df = df
         self.extractor = extractor
-        for idx, row in self.df.iterrows():
-            if 'audio' in row and 'sr' in row and row['audio'] is not None and row['sr'] is not None:
-                try:
-                    # Use get_cached_spectrogram to populate cache
-                    self.get_cached_spectrogram(idx, row['audio'], row['sr'])
-                except Exception as e:
-                    print(f"Error processing spectrogram for row {idx}: {e}")
 
         # --- Output Widget ---
         self.plot_output = widgets.Output()
@@ -153,6 +146,9 @@ class Chatter:
                 zoom_factor=self.zoom_slider.value,
                 minor_tick_step=self.minor_tick_step.value
             )
+            self.current_fig = fig
+            self.current_ax = ax
+            self.current_S_db = S_db
             # Draw overlays on the same axes
             plot_bout_overlays(
                 ax,
@@ -240,6 +236,10 @@ class Chatter:
 
         with self.plot_output:
             clear_output(wait=True)
+            if self.current_fig is not None:
+                plt.close(self.current_fig)
+                self.current_fig = None
+                self.current_ax = None
             plt.close('all')
             # Only redraw base if new bird/recording
             # Determine if we need to redraw the spectrogram base
@@ -268,11 +268,14 @@ class Chatter:
 
     def _on_bird_change(self, change):
         if change['type'] == 'change' and change['name'] == 'value':
-            # Clear outputs to avoid overlapping
             self.output_finalize.clear_output()
             self.output_save_bouts.clear_output()
-    
-            # Load parameters for the selected bird
+            old_idx = change['old']
+            if old_idx in self.spectrogram_cache:
+                del self.spectrogram_cache[old_idx]
+            self.current_fig = None
+            self.current_ax = None
+            self.current_S_db = None
             self._load_params_for_bird(change['new'])
 
 
@@ -337,6 +340,7 @@ class Chatter:
         if bout_rows:
             new_bouts_df = pd.DataFrame(bout_rows)
             self.bouts_df = pd.concat([self.bouts_df, new_bouts_df], ignore_index=True)
+            del new_bouts_df
             # Save to CSV every time
             self.bouts_df.to_csv("bouts.csv", index=False)
         with self.output_save_bouts:
