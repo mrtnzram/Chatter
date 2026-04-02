@@ -8,7 +8,7 @@ from visualizations import *
 import librosa
 
 class Chatter:
-    def __init__(self, df, extractor):
+    def __init__(self, df, extractor, bouts_csv=None):
         self.spectrogram_cache = {}
         self.df = df
         self.extractor = extractor
@@ -122,11 +122,33 @@ class Chatter:
             }
         )
 
-        # --- Load bouts_df from CSV if exists ---
-        if os.path.exists("bouts.csv"):
+        # --- Load bouts_df from provided CSV path, fallback to default, or start empty ---
+        if bouts_csv is not None:
+            self.bouts_csv_path = bouts_csv
+            self.bouts_df = pd.read_csv(bouts_csv) if os.path.exists(bouts_csv) else pd.DataFrame()
+        elif os.path.exists("bouts.csv"):
+            print("Warning: found existing 'bouts.csv' — loading it. Pass bouts_csv='path' explicitly to avoid this.")
+            self.bouts_csv_path = "bouts.csv"
             self.bouts_df = pd.read_csv("bouts.csv")
         else:
+            self.bouts_csv_path = "bouts.csv"
             self.bouts_df = pd.DataFrame()
+
+        # --- Reconcile saved bouts back into self.df ---
+        if not self.bouts_df.empty:
+            for (species, bird_id), group in self.bouts_df.groupby(['species', 'bird_id']):
+                mask = (self.df['species'] == species) & (self.df['bird_id'] == bird_id)
+                if mask.any():
+                    idx = self.df[mask].index[0]
+                    bouts = group.sort_values('onset').apply(
+                        lambda r: {
+                            'onset': r['onset'],
+                            'offset': r['offset'],
+                            'wavstart': r['wavstart'],
+                            'wavend': r['wavend'],
+                        }, axis=1
+                    ).tolist()
+                    self.df.at[idx, 'bouts'] = bouts
 
     def _draw_base_and_overlay(self, idx,zoom_val,minor_tick_step_val):
         row = self.df.iloc[idx].copy()
@@ -225,6 +247,7 @@ class Chatter:
         if 'bouts' in row and isinstance(row['bouts'], list) and len(row['bouts']) > 0:
             combined['bouts'] = row['bouts']
 
+        combined['bouts'] = sorted(combined['bouts'], key=lambda b: b['onset'])
         self.current_bouts[idx] = combined['bouts']
 
         bout_options = []
@@ -305,7 +328,8 @@ class Chatter:
         prev_offset = None
         audio, sr = row['audio'], row['sr']
         bout_rows = []
-        for bout_id, bout in enumerate(row['bouts']):
+        sorted_bouts = sorted(row['bouts'], key=lambda b: b['onset'])
+        for bout_id, bout in enumerate(sorted_bouts):
             onset = bout['onset']
             offset = bout['offset']
             wavstart = bout['wavstart']
@@ -339,10 +363,15 @@ class Chatter:
         # Append to self.bouts_df
         if bout_rows:
             new_bouts_df = pd.DataFrame(bout_rows)
+            if not self.bouts_df.empty:
+                self.bouts_df = self.bouts_df[
+                    ~((self.bouts_df['species'] == row['species']) & (self.bouts_df['bird_id'] == row['bird_id']))
+                ]
             self.bouts_df = pd.concat([self.bouts_df, new_bouts_df], ignore_index=True)
+            self.bouts_df = self.bouts_df.sort_values(['species', 'bird_id', 'onset']).reset_index(drop=True)
             del new_bouts_df
             # Save to CSV every time
-            self.bouts_df.to_csv("bouts.csv", index=False)
+            self.bouts_df.to_csv(self.bouts_csv_path, index=False)
         with self.output_save_bouts:
             clear_output()
             print(f"Exported {len(bout_rows)} bouts for {row['species']} {row['bird_id']} and appended to bouts_df. CSV saved.")
@@ -440,6 +469,7 @@ class Chatter:
             bouts[bout_id]['wavstart'] = max(new_onset - pad_val, 0)
             bouts[bout_id]['wavend'] = min(new_offset + pad_val, audio_len_sec)
 
+            bouts.sort(key=lambda b: b['onset'])
             self.df.at[idx, 'bouts'] = bouts
             self.current_bouts[idx] = bouts
 
