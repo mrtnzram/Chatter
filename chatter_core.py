@@ -149,6 +149,7 @@ class Chatter:
                         }, axis=1
                     ).tolist()
                     self.df.at[idx, 'bouts'] = bouts
+                    self.current_bouts[idx] = bouts
 
     def _draw_base_and_overlay(self, idx,zoom_val,minor_tick_step_val):
         row = self.df.iloc[idx].copy()
