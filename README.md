@@ -3,19 +3,19 @@
 Semi-automatic bout segmentation from bird song recordings using acoustic features such as Spectral Flux, Energy, and MFCC coefficients.
 
 ## Getting Started
-To get Nester started on your device, follow the installation steps below.
+Chatter uses [uv](https://docs.astral.sh/uv/) to manage its Python environment and dependencies. Follow the installation steps below.
 
 1) Open terminal/powershell.
-2) Set path to directory where you want to clone the directory: `cd filepath`
-3) Clone directory: `git clone https://github.com/mrtnzram/Chatter.git`
-4) Create conda environment: `conda create -n env_name python==3.10.16 
-pip`
-5) Activate environment: `conda activate env_name`
-6) Install interactive widget dependencies: `conda install -c conda-forge ipympl jupyterlab`
-7) If Jupyter is not already installed, install Jupyter: `pip install jupyter`
-8) Install the dependencies using: `pip install -r requirements.txt`
-9) Run Jupyter lab: `jupyter lab`
-10) Open Chatter.ipynb
+2) Install uv (if you don't have it): `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or see the [uv install docs](https://docs.astral.sh/uv/getting-started/installation/) for Windows.
+3) Set path to directory where you want to clone the directory: `cd filepath`
+4) Clone directory: `git clone https://github.com/mrtnzram/Chatter.git`
+5) Move into the project: `cd Chatter`
+6) Create the environment and install dependencies: `uv sync`
+   - To include BirdNET support, run `uv sync --extra birdnet` instead.
+7) Run Jupyter lab: `uv run jupyter lab`
+8) Open Chatter.ipynb
+
+uv reads `pyproject.toml` and the pinned `uv.lock`, creating a `.venv` automatically — there is no separate `requirements.txt` to install.
 
 ## The Process 
 

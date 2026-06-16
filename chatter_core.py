@@ -1,17 +1,23 @@
 import os
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from IPython.display import clear_output, display, Audio, HTML
 import ipywidgets as widgets
 from visualizations import *
 import librosa
+from chatter_store import ChatterStore
 
 class Chatter:
-    def __init__(self, df, extractor, bouts_csv=None):
-        self.spectrogram_cache = {}
+    def __init__(self, df, extractor, bouts_csv=None, duckdb_path="chatter.duckdb"):
         self.df = df
         self.extractor = extractor
+
+        # --- Data-access layer: persistent bouts (DuckDB) + ephemeral
+        #     in-memory spectrogram cache (DuckDB :memory:). ---
+        self.store = ChatterStore(
+            duckdb_path=duckdb_path,
+            csv_path=(bouts_csv or "bouts.csv"),
+        )
 
         # --- Output Widget ---
         self.plot_output = widgets.Output()
@@ -122,22 +128,15 @@ class Chatter:
             }
         )
 
-        # --- Load bouts_df from provided CSV path, fallback to default, or start empty ---
-        if bouts_csv is not None:
-            self.bouts_csv_path = bouts_csv
-            self.bouts_df = pd.read_csv(bouts_csv) if os.path.exists(bouts_csv) else pd.DataFrame()
-        elif os.path.exists("bouts.csv"):
-            print("Warning: found existing 'bouts.csv' — loading it. Pass bouts_csv='path' explicitly to avoid this.")
-            self.bouts_csv_path = "bouts.csv"
-            self.bouts_df = pd.read_csv("bouts.csv")
-        else:
-            self.bouts_csv_path = "bouts.csv"
-            self.bouts_df = pd.DataFrame()
-
-        # --- Reconcile saved bouts back into self.df ---
-        if not self.bouts_df.empty:
-            for (species, bird_id), group in self.bouts_df.groupby(['species', 'bird_id']):
-                mask = (self.df['species'] == species) & (self.df['bird_id'] == bird_id)
+        # --- Reconcile saved bouts (from DuckDB) back into self.df ---
+        saved_bouts_df = self.store.get_bouts_df()
+        if not saved_bouts_df.empty:
+            for (species, bird_id, song_id), group in saved_bouts_df.groupby(['species', 'bird_id', 'song_id']):
+                mask = (
+                    (self.df['species'] == species)
+                    & (self.df['bird_id'] == bird_id)
+                    & (self.df['song_id'] == song_id)
+                )
                 if mask.any():
                     idx = self.df[mask].index[0]
                     bouts = group.sort_values('onset').apply(
@@ -151,10 +150,20 @@ class Chatter:
                     self.df.at[idx, 'bouts'] = bouts
                     self.current_bouts[idx] = bouts
 
+    @property
+    def bouts_df(self):
+        """Preview of bouts.csv — reads directly from disk so the notebook cell
+        shows exactly what is in the file."""
+        return self.store.get_bouts_csv_df()
+
+    def close(self):
+        """Close the underlying DuckDB connections."""
+        self.store.close()
+
     def _draw_base_and_overlay(self, idx,zoom_val,minor_tick_step_val):
         row = self.df.iloc[idx].copy()
         # Use cached spectrogram
-        S_db, sr = self.get_cached_spectrogram(idx, row['audio'], row['sr'])
+        S_db, sr = self.get_cached_spectrogram(row['wav_location'], row['audio'], row['sr'])
         plot_row = row.copy()
         plot_row['audio'] = row['audio']
         plot_row['sr'] = row['sr']
@@ -186,12 +195,16 @@ class Chatter:
             html = HTML(f'<div style="text-align:center;">{audio_widget._repr_html_()}</div>')
             display(html)
 
-    def get_cached_spectrogram(self, idx, audio, sr):
-        if idx in self.spectrogram_cache:
-            return self.spectrogram_cache[idx]
+    def get_cached_spectrogram(self, wav_location, audio, sr):
+        cache_key = ChatterStore.make_cache_key(
+            wav_location, sr, self.extractor.hop_length, self.extractor.frame_length
+        )
+        cached = self.store.get_cached_spectrogram(cache_key)
+        if cached is not None:
+            return cached
         S = librosa.stft(audio)
         S_db = librosa.amplitude_to_db(np.abs(S), ref=np.max)
-        self.spectrogram_cache[idx] = (S_db, sr)
+        self.store.set_cached_spectrogram(cache_key, S_db, sr)
         return S_db, sr
 
     def _load_params_for_bird(self, idx):
@@ -294,9 +307,8 @@ class Chatter:
         if change['type'] == 'change' and change['name'] == 'value':
             self.output_finalize.clear_output()
             self.output_save_bouts.clear_output()
-            old_idx = change['old']
-            if old_idx in self.spectrogram_cache:
-                del self.spectrogram_cache[old_idx]
+            # The spectrogram cache is now LRU-managed in the store; revisiting a
+            # bird is a cache hit rather than a recompute, so no eviction here.
             self.current_fig = None
             self.current_ax = None
             self.current_S_db = None
@@ -361,18 +373,11 @@ class Chatter:
                 'bout_wav': bout_path
             })
             prev_offset = offset
-        # Append to self.bouts_df
         if bout_rows:
-            new_bouts_df = pd.DataFrame(bout_rows)
-            if not self.bouts_df.empty:
-                self.bouts_df = self.bouts_df[
-                    ~((self.bouts_df['species'] == row['species']) & (self.bouts_df['bird_id'] == row['bird_id']))
-                ]
-            self.bouts_df = pd.concat([self.bouts_df, new_bouts_df], ignore_index=True)
-            self.bouts_df = self.bouts_df.sort_values(['species', 'bird_id', 'onset']).reset_index(drop=True)
-            del new_bouts_df
-            # Save to CSV every time
-            self.bouts_df.to_csv(self.bouts_csv_path, index=False)
+            # DuckDB is the source of truth: replace this recording's bouts and
+            # regenerate the CSV export for backward compatibility.
+            self.store.upsert_bouts(bout_rows)
+            self.store.export_bouts_csv()
         with self.output_save_bouts:
             clear_output()
             print(f"Exported {len(bout_rows)} bouts for {row['species']} {row['bird_id']} and appended to bouts_df. CSV saved.")
@@ -453,69 +458,102 @@ class Chatter:
             self.update_bout_btn.disabled = False
 
 
+    def _overlapping_bouts(self, onset, offset, bouts, exclude_idx=None):
+        """Return list of (i, bout) whose [onset, offset] overlaps with the given interval."""
+        return [
+            (i, b) for i, b in enumerate(bouts)
+            if i != exclude_idx and onset < b['offset'] and b['onset'] < offset
+        ]
+
     def _on_update_bout_clicked(self, b):
         idx = self.dropdown.value
         selected = list(self.bout_select.value)
-        if len(selected) == 1 and selected[0] < len(self.current_bouts[idx]):
-            bout_id = selected[0]
-            bouts = self.current_bouts[idx]
-            new_onset = self.onset_box.value
-            new_offset = self.offset_box.value
-            bouts[bout_id]['onset'] = new_onset
-            bouts[bout_id]['offset'] = new_offset
+        if not (len(selected) == 1 and selected[0] < len(self.current_bouts[idx])):
+            return
+        bout_id = selected[0]
+        bouts = self.current_bouts[idx]
+        new_onset = self.onset_box.value
+        new_offset = self.offset_box.value
 
-            pad_val = self.pad.value
-            row = self.df.iloc[idx]
-            audio_len_sec = len(row['audio']) / row['sr'] if 'audio' in row and 'sr' in row else np.inf
-            bouts[bout_id]['wavstart'] = max(new_onset - pad_val, 0)
-            bouts[bout_id]['wavend'] = min(new_offset + pad_val, audio_len_sec)
-
-            bouts.sort(key=lambda b: b['onset'])
-            self.df.at[idx, 'bouts'] = bouts
-            self.current_bouts[idx] = bouts
-
+        if new_onset >= new_offset:
             with self.output_update_bout:
                 clear_output()
-                print(f"Updated Bout {bout_id}: Onset={new_onset:.2f}, Offset={new_offset:.2f}, wavstart={bouts[bout_id]['wavstart']:.2f}, wavend={bouts[bout_id]['wavend']:.2f}")
+                print("Error: Onset must be less than Offset.")
+            return
 
-            self.update_plot(
-                idx,
-                self.mfcc_threshold.value,
-                self.energy_threshold.value,
-                self.active_region_thresh.value,
-                self.min_silence.value,
-                self.min_bout_len.value,
-                self.pad.value,
-                self.zoom_slider.value,          
-                self.minor_tick_step.value       
-            )
+        overlaps = self._overlapping_bouts(new_onset, new_offset, bouts, exclude_idx=bout_id)
+        if overlaps:
+            with self.output_update_bout:
+                clear_output()
+                overlap_ids = [i for i, _ in overlaps]
+                print(f"Error: Updated range overlaps with bout(s) {overlap_ids}. Adjust onset/offset to avoid overlap.")
+            return
+
+        pad_val = self.pad.value
+        row = self.df.iloc[idx]
+        audio_len_sec = len(row['audio']) / row['sr'] if 'audio' in row and 'sr' in row else np.inf
+        wavstart = max(new_onset - pad_val, 0)
+        wavend = min(new_offset + pad_val, audio_len_sec)
+
+        bouts[bout_id]['onset'] = new_onset
+        bouts[bout_id]['offset'] = new_offset
+        bouts[bout_id]['wavstart'] = wavstart
+        bouts[bout_id]['wavend'] = wavend
+
+        bouts.sort(key=lambda b: b['onset'])
+        self.df.at[idx, 'bouts'] = bouts
+        self.current_bouts[idx] = bouts
+
+        with self.output_update_bout:
+            clear_output()
+            print(f"Updated Bout {bout_id}: Onset={new_onset:.2f}, Offset={new_offset:.2f}, wavstart={wavstart:.2f}, wavend={wavend:.2f}")
+
+        self.update_plot(
+            idx,
+            self.mfcc_threshold.value,
+            self.energy_threshold.value,
+            self.active_region_thresh.value,
+            self.min_silence.value,
+            self.min_bout_len.value,
+            self.pad.value,
+            self.zoom_slider.value,
+            self.minor_tick_step.value
+        )
 
     def on_add_bout_clicked(self, b):
         idx = self.dropdown.value
         bouts = self.current_bouts.get(idx, [])
         new_onset = self.onset_box.value
         new_offset = self.offset_box.value
-    
-        # Validate that onset is less than offset
+
         if new_onset >= new_offset:
             with self.output_add_bout:
                 clear_output()
                 print("Error: Onset must be less than Offset.")
             return
-    
-        # Add the new bout
+
+        overlaps = self._overlapping_bouts(new_onset, new_offset, bouts)
+        if overlaps:
+            with self.output_add_bout:
+                clear_output()
+                overlap_ids = [i for i, _ in overlaps]
+                print(f"Error: New bout overlaps with bout(s) {overlap_ids}. Adjust onset/offset to avoid overlap.")
+            return
+
+        audio_len_sec = len(self.df.iloc[idx]['audio']) / self.df.iloc[idx]['sr']
         new_bout = {
             'onset': round(new_onset, 3),
             'offset': round(new_offset, 3),
             'wavstart': round(max(0, new_onset - self.pad.value), 3),
-            'wavend': round(min(len(self.df.iloc[idx]['audio']) / self.df.iloc[idx]['sr'], new_offset + self.pad.value), 3)
+            'wavend': round(min(audio_len_sec, new_offset + self.pad.value), 3),
+            'outlier_flag': 0
         }
         bouts.append(new_bout)
-        bouts.sort(key=lambda b: b['onset'])  # Ensure bouts are sorted
-    
+        bouts.sort(key=lambda b: b['onset'])
+
         self.df.at[idx, 'bouts'] = bouts
         self.current_bouts[idx] = bouts
-    
+
         with self.output_add_bout:
             clear_output()
             print(f"Added new bout: Onset={new_bout['onset']}, Offset={new_bout['offset']}")

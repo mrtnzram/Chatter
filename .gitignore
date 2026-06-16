@@ -1,0 +1,13 @@
+# uv / Python environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# User data produced at runtime — not source files
+chatter.duckdb
+bouts.csv
+bouts_audio/
+
+# Jupyter artifacts
+.ipynb_checkpoints/
