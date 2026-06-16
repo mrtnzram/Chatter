@@ -6,6 +6,7 @@ __pycache__/
 
 # User data produced at runtime — not source files
 chatter.duckdb
+chatter.duckdb.wal
 bouts.csv
 bouts_audio/
 
