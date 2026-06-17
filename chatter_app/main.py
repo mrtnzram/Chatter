@@ -40,6 +40,16 @@ for _p in (_core_dir, _widgets_dir, _screens_dir, _app_dir):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+
+def resource_path(*parts):
+    """Resolve a bundled resource path.
+
+    Works both when running from source (relative to this file) and when
+    frozen by PyInstaller (relative to the extraction dir ``sys._MEIPASS``).
+    """
+    base = getattr(sys, '_MEIPASS', _app_dir)
+    return os.path.join(base, *parts)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -64,7 +74,7 @@ from welcome_screen import WelcomeScreen
 
 class ChatterApp(App):
     title = 'Chatter — Bird Song Bout Segmentation'
-    icon = os.path.join(_app_dir, 'assets', 'zebrafinch.png')
+    icon = resource_path('assets', 'zebrafinch.png')
 
     def build(self):
         self._sm = ScreenManager(transition=FadeTransition(duration=0.25))
@@ -76,13 +86,17 @@ class ChatterApp(App):
     # Welcome screen → main app transition
     # ------------------------------------------------------------------
 
-    def _on_launch(self, songs_dir: str, csv_dir: str, bouts_audio_dir: str):
+    def _on_launch(self, songs_dir: str, csv_dir: str, bouts_audio_dir: str,
+                   audio_params: dict | None = None):
         """Called by WelcomeScreen after the user clicks Launch.
 
         Runs dataset scanning + controller setup on a background thread so the
         UI stays responsive, then switches to ChatterScreen on the main thread.
+
+        ``audio_params`` carries the audio-feature settings chosen on the
+        welcome screen (sr, n_mfcc, hop_length, frame_length).
         """
-        extractor_kwargs = {}
+        extractor_kwargs = dict(audio_params or {})
         if USE_BIRDNET and os.path.isdir(BIRDNET_MODEL_PATH):
             extractor_kwargs['use_birdnet'] = True
             extractor_kwargs['birdnet_model_path'] = BIRDNET_MODEL_PATH

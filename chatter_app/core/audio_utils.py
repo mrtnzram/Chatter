@@ -57,6 +57,10 @@ def create_initial_dataset(root_dir):
                         'chunk_num': 0,
                         'n_chunks': 1,
                     })
+    if not data:
+        # No .wav files found — return an empty frame so callers can show a
+        # friendly message instead of hitting a KeyError on a missing column.
+        return pd.DataFrame()
     df = pd.DataFrame(data)
     df = df.sort_values('wav_location').reset_index(drop=True)
     df['bird_id'] = df['bird_id'].astype(str)

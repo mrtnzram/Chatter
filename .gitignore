@@ -14,3 +14,15 @@ bouts_audio/
 
 #Claude
 Claude.md
+
+# Local-only docs (not published to the repo)
+docs/RELEASING.md
+docs/SETUP.md
+docs/MANUAL.md
+
+# PyInstaller build artifacts (generated locally or in CI)
+build/
+dist/
+chatter_app/Chatter.icns
+chatter_app/Chatter.ico
+chatter_app/Chatter.iconset/

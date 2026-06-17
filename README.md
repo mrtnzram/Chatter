@@ -1,21 +1,59 @@
 # Chatter
 
-Semi-automatic bout segmentation from bird song recordings using acoustic features such as Spectral Flux, Energy, and MFCC coefficients.
+Semi-automatic bout segmentation from bird song recordings using acoustic features such as Spectral Flux, Energy, and MFCC coefficients. An optional machine learning stage helps ensure only bird songs are kept — using MFCC-based speech detection to flag and filter out human voices and other non-song outliers.
 
-## Getting Started
-Chatter uses [uv](https://docs.astral.sh/uv/) to manage its Python environment and dependencies. Follow the installation steps below.
+Chatter is a desktop application (built with Kivy). The recommended way to use it
+is to download a pre-packaged build.
 
-1) Open terminal/powershell.
-2) Install uv (if you don't have it): `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or see the [uv install docs](https://docs.astral.sh/uv/getting-started/installation/) for Windows.
-3) Set path to directory where you want to clone the directory: `cd filepath`
-4) Clone directory: `git clone https://github.com/mrtnzram/Chatter.git`
-5) Move into the project: `cd Chatter`
-6) Create the environment and install dependencies: `uv sync`
-   - To include BirdNET support, run `uv sync --extra birdnet` instead.
-7) Run Jupyter lab: `uv run jupyter lab`
-8) Open Chatter.ipynb
+> The original Jupyter notebook workflow (`Chatter.ipynb`) has been **retired**
+> and superseded by the desktop app described below. If you still want the
+> notebook version, it remains available as the
+> [**v0.3.0 release**](https://github.com/mrtnzram/Chatter/releases/tag/v0.3.0).
 
-uv reads `pyproject.toml` and the pinned `uv.lock`, creating a `.venv` automatically — there is no separate `requirements.txt` to install.
+## Download (recommended)
+
+Grab the latest build for your platform from the
+[**Releases page**](https://github.com/mrtnzram/Chatter/releases):
+
+| Platform | File | What to do |
+| --- | --- | --- |
+| Windows | `Chatter.exe` | Download and double-click to run. |
+| macOS | `Chatter-macos.zip` | Unzip, then open `Chatter.app` (see note below). |
+
+### Windows
+
+Double-click `Chatter.exe`. Because the app is **not code-signed**, Windows
+SmartScreen may show a blue "Windows protected your PC" warning on first launch —
+click **More info → Run anyway**. The first launch is a little slow (the
+single-file exe unpacks itself to a temporary folder each time it starts).
+
+### macOS
+
+Unzip the download and move `Chatter.app` to your Applications folder. The app is
+**unsigned / not notarized**, so the first launch needs one extra step to get past
+Gatekeeper:
+
+1. **Right-click (or Control-click) `Chatter.app` → Open**, then click **Open** in
+   the dialog that appears.
+2. If macOS still blocks it, go to **System Settings → Privacy & Security**, scroll
+   to the Security section, and click **Open Anyway** next to the Chatter message,
+   then launch the app again.
+
+You only need to do this once; afterward it opens normally.
+
+## Run from source (developers)
+
+Contributors can run the app directly from the repository:
+
+1. Clone the repo: `git clone https://github.com/mrtnzram/Chatter.git`
+2. Move into it: `cd Chatter`
+3. Install the Kivy app dependencies: `pip install -r chatter_app/requirements_kivy.txt`
+   - To include optional BirdNET support, also `pip install birdnetlib tensorflow`.
+4. Launch the app:
+   ```bash
+   cd chatter_app
+   python main.py
+   ```
 
 ## The Process 
 
@@ -24,163 +62,136 @@ Chatter mainly uses librosa's audio extracting features paired with computationa
 ![Chatterprocess](https://github.com/mrtnzram/Chatter/blob/master/chatter_app/assets/Chatterprocess.png)
 
 ---
-# Chatter Widget Features & Usage Guide
+# Using the App
 
-## Overview
-
-The Chatter interface provides interactive widgets for exploring, editing, and exporting detected song bouts from your dataset. Below is a quick reference for each widget and button.
-
----
-
-## Widget Features
-
-### Bird Selection
-- **Dropdown:**  
-  Selects which bird/song to display and edit.
-
-### Parameter Controls
-- **MFCC Thresh:**  
-  Minimum variance in MFCCs for a frame to be considered active.
-- **Energy Thresh:**  
-  Minimum RMS energy (as a fraction of max) for a frame to be considered active.
-- **Active Region Thresh:**  
-  Minimum spectral flux (as a fraction of max) for a frame to be considered active.
-- **Min Silence:**  
-  Minimum silence (in seconds) to separate two bouts.
-- **Min Bout Len:**  
-  Minimum duration (in seconds) for a detected bout.
-- **Pad:**  
-  Padding (in seconds) before and after each detected bout.
-
-### Bout Selection & Editing
-- **Bouts (SelectMultiple):**  
-  Select one or more bouts for removal or editing.
-- **Mark as Not Outlier**
-  Unmark false outlier flags.
-- **Onset/Offset:**  
-  Edit the start and end time (in seconds) for a selected bout.
-- **Update Bout:**  
-  Save changes to the onset/offset of the selected bout.
-- **Add Bout:**  
-  Add a new bout using the current onset/offset values.
-- **Remove Bouts:**  
-  Remove the selected bouts from the list.
-
-### Actions
-- **Finalize Parameters:**  
-  Apply and save the current parameter settings for the selected bird/song and update the df dataframe with the new audio feature values. (You will not need to press this button if you are keeping the parameters default)
-- **Export Bouts:**  
-  Save all detected bouts as separate audio files and appends bout metadata to chatter.bouts_df
-
-### Plot
-- The X axis is Time(s) incremeted and marked every second with minor increments for every 0.1 seconds to assist in pinpointing bout start and end times
----
+> This is a quick-start summary. A full step-by-step **manual** (with screenshots)
+> will be added separately as `docs/manual.md`.
 
 ## How to Use
 
-1. **Specify Recording Directory**
-   In the second cell in the notebook, specify where your recordings are to create the initial dataframe. The script follows the naming convention: `Genus-species-birdid.wav` for extracting the respective bird metadata.
+1. **Pick your folders (Welcome screen).** On launch, choose three directories:
+   - **Recording directory** — the folder of `.wav` files to analyze. Filenames
+     should follow `Genus-species-birdid.wav` so Chatter can read each bird's
+     metadata.
+   - **CSV export directory** — where `bouts.csv` and `chatter.duckdb` are written.
+   - **Bouts audio directory** — where exported audio clips are saved.
 
-3. **Select a Bird:**  
-   Use the dropdown to choose a bird/song.
+   The CSV and audio directories are auto-filled from the recording folder; you can
+   override them. Click **Launch** to scan the dataset and open the main screen.
 
-4. **Adjust Parameters:**  
-   Modify detection parameters as needed. The plot and detected bouts will update automatically. (The default parameters should work well for most use cases)
+2. **Select a bird/recording.** Use the dropdown (or the prev/next arrows) at the
+   top to choose which recording to display and edit.
 
-5. **Edit Bouts:**  
-   - Select a bout to edit its onset/offset, then click **Update Bout**.
-   - If a bout is marked as an outlier even tho it is not, then click **Mark as Not Outlier**
-   - To add a new bout, set onset/offset and click **Add Bout**.
-   - To remove bouts, select one or multiple and click **Remove Bouts**.
+3. **Adjust detection parameters (optional).** Edit the parameter fields (MFCC
+   threshold, energy threshold, active-region threshold, min silence, min bout
+   length, pad). The spectrogram and detected bouts recompute automatically. The
+   defaults work well for most recordings — see
+   [AudioFeatureExtractor Parameters](#audiofeatureextractor-parameters) for what
+   each one does.
 
-6. **Finalize & Export:**  
-   - Click **Finalize Parameters** to save settings for the current bird.
-   - Click **Export Bouts** to save all bouts and append it to the chatter.bouts_df and bouts.csv and export the audio clips.
-   - Note: if you have an existing bouts.csv **Export Bouts** will recognize this file as the base for chatter.bouts_df and append the file accordingly. This way you can comeback to your progress anytime.
+4. **Edit bouts directly on the spectrogram.**
+   - **Drag** the spectrogram to scroll through time.
+   - **Shift + Drag** to add a new bout over a region.
+   - **Cmd/Ctrl + Drag** an onset/offset line to move that boundary.
+
+   Or use the buttons: select bouts in the list and click **Update Bout**,
+   **Add Bout**, or **Remove Bouts**. If a good bout is wrongly flagged as an
+   outlier, select it and click **Mark Not Outlier**.
+
+5. **Finalize & export.**
+   - **Finalize Parameters** saves the current parameter settings for the selected
+     bird (only needed if you changed parameters from the defaults).
+   - **Export Bouts** writes each bout as an audio clip to the bouts audio directory
+     and appends bout metadata to `bouts.csv` + `chatter.duckdb`. If a `bouts.csv`
+     already exists, Chatter appends to it, so you can return to your progress
+     anytime. The **Pad** parameter controls how much extra audio (in seconds) is
+     kept before each bout's onset and after its offset in the exported clips — so
+     the clips include a little lead-in/lead-out rather than cutting off exactly at
+     the detected boundaries.
+
+6. **Start over.** **New Project** (top-right) returns to the Welcome screen to pick
+   a different dataset. Un-exported edits are lost, so export first.
+
+> **Tip:** 30-second to 1-minute recordings work best. Longer files make
+> recompute and bird-switching slower. To mitigate process time in longer files, they are chunked into 2 minute recordings shown as recording_n in the dropdown. 
 ---
 
-## AudioFeatureExtractor Parameters
+## Audio Feature Settings
 
-- **sr**  
+These control how audio is loaded and how the underlying features are computed.
+They are set once on the **Welcome screen** (under *Audio Feature Settings*) before
+you launch a project, and apply to the whole session. The defaults work for most
+recordings.
+
+- **Sample Rate** (`sr`)  
 
   *default: 22050*  
 
   The target sampling rate for audio loading.  
   All audio files will be resampled to this rate.
 
-- **n_mfcc**  
+- **MFCC Count** (`n_mfcc`)  
 
   *default: 13*  
 
   Number of Mel-frequency cepstral coefficients (MFCCs) to compute for each frame.
 
-- **hop_length**  
+- **Hop Length** (`hop_length`)  
 
   *default: 512*  
 
   Number of samples between successive frames for all frame-based calculations.  
   Controls the time resolution of features.
 
-- **frame_length**  
+- **Frame Length** (`frame_length`)  
 
   *default: 2048*  
 
   Number of samples per analysis frame for energy and spectral calculations.
 
-- **mfcc_threshold**  
+## Chatter Parameters
+
+These are the per-recording detection parameters you adjust on the **main screen**.
+The spectrogram and detected bouts recompute automatically as you change them.
+
+- **MFCC Thresh** (`mfcc_threshold`)  
+
   *default: 0.5*  
+
   The minimum variance required in the MFCCs for a frame to be considered active.  
   Used in refining active regions.
 
-- **energy_threshold_pct**  
+- **Energy Thresh** (`energy_threshold`)  
 
-  *default: 0.02*  
+  *default: 0.1*  
 
   The minimum RMS energy required for a frame to be considered active,  
   expressed as a fraction of the maximum RMS energy.
 
-- **min_silence**  
-
-  *default: 0.8*  
-
-  Minimum duration of silence (in seconds) required to separate two bouts.  
-  Shorter silences will be merged into a single bout.
-
-- **pad**  
-
-  *default: 0.75*  
-
-  Amount of time (in seconds) to pad around detected bouts before the onset and after the offset of each detected bout for exporting as wav files.
-
-- **active_region_threshold_pct**  
+- **Active Region Thresh** (`active_region_thresh`)  
 
   *default: 0.001*  
 
   The minimum spectral flux (as a fraction of the maximum) required for a frame to be considered active.
 
-- **min_bout_length**  
+- **Min Silence** (`min_silence`)  
+
+  *default: 0.9*  
+
+  Minimum duration of silence (in seconds) required to separate two bouts.  
+  Shorter silences will be merged into a single bout.
+
+- **Min Bout Len** (`min_bout_len`)  
 
   *default: 1.0*  
 
   Minimum duration (in seconds) for a detected bout to be kept.
 
-- **model**
-    
-  *default: None*
- 
-  Optional classifier model for post-processing or classification of bouts. Takes your models path. If you have an existing model that detects outliers (human speech) among the detected bouts, this may be useful.
+- **Pad** (`pad`)  
 
-- **use_birdnet**
+  *default: 0.5*  
 
-  *default: False*
-
-  Optional clasifier model [BirdNEt](https://birdnet.cornell.edu/) which utilizes bird recognition to detect outlier bouts
-
-- **birdnet_model_path**
-
-  *default: None*
-
-  When use_birdnet = True, make sure to direct the program to where Birdnet is located on your device.
+  Amount of time (in seconds) to pad around detected bouts — before the onset and after the offset — when exporting each bout as a wav file.
 
 # DataFrames in Chatter
 
@@ -229,6 +240,5 @@ This DataFrame is created when you export bouts (e.g., with the "Export Bouts" b
 
 ## Notes
 
-- I recommend using 30 second to 1 minute song recordings, anything longer makes processing take longer when updating bouts and/or selecting new bird recordings.
 - The spectrogram and overlays update automatically with parameter changes.
 - All edits are reflected in the current session and can be exported at any time.

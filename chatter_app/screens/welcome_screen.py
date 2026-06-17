@@ -12,6 +12,7 @@ defaults (parent dir and parent/bouts_audio); the user can override them.
 from __future__ import annotations
 
 import os
+import sys
 from typing import Callable
 
 from kivy.graphics import Color as GColor, Rectangle as GRect
@@ -28,13 +29,17 @@ from kivy.uix.widget import Widget
 from kivy.metrics import dp, sp
 
 _screen_dir = os.path.dirname(os.path.abspath(__file__))
-_assets_dir = os.path.join(os.path.dirname(_screen_dir), 'assets')
+# When frozen by PyInstaller, assets are extracted to sys._MEIPASS/assets;
+# from source they live at chatter_app/assets (the parent of screens/).
+_assets_dir = os.path.join(
+    getattr(sys, '_MEIPASS', os.path.dirname(_screen_dir)), 'assets'
+)
 
 
 class WelcomeScreen(Screen):
     """Landing page: logo placeholder + directory pickers + Launch button."""
 
-    def __init__(self, on_launch: Callable[[str, str, str], None], **kwargs):
+    def __init__(self, on_launch: Callable[[str, str, str, dict], None], **kwargs):
         super().__init__(**kwargs)
         self._on_launch_cb = on_launch
         self._build_ui()
@@ -118,6 +123,30 @@ class WelcomeScreen(Screen):
 
         # Auto-fill csv / audio dirs when the recording dir changes
         self._rec_input.bind(text=self._on_rec_dir_changed)
+
+        content.add_widget(_thin_divider())
+
+        # ── Audio feature settings ─────────────────────────────────────
+        audio_lbl = Label(
+            text='Audio Feature Settings  (defaults work for most recordings)',
+            font_size=sp(13),
+            bold=True,
+            size_hint_y=None, height=dp(26),
+            color=(0.45, 0.50, 0.62, 1),
+            halign='left',
+        )
+        audio_lbl.bind(size=audio_lbl.setter('text_size'))
+        content.add_widget(audio_lbl)
+
+        arow1 = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
+        self._sr_input    = _num_field(arow1, 'Sample Rate:', 22050)
+        self._nmfcc_input = _num_field(arow1, 'MFCC Count:',  13)
+        content.add_widget(arow1)
+
+        arow2 = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
+        self._hop_input   = _num_field(arow2, 'Hop Length:',   512)
+        self._frame_input = _num_field(arow2, 'Frame Length:', 2048)
+        content.add_widget(arow2)
 
         content.add_widget(_thin_divider())
 
@@ -247,10 +276,24 @@ class WelcomeScreen(Screen):
             self._set_error('Please choose a CSV Export Directory.')
             return
 
+        try:
+            audio_params = {
+                'sr':           int(self._sr_input.text),
+                'n_mfcc':       int(self._nmfcc_input.text),
+                'hop_length':   int(self._hop_input.text),
+                'frame_length': int(self._frame_input.text),
+            }
+        except ValueError:
+            self._set_error('Audio feature settings must be whole numbers.')
+            return
+        if any(v <= 0 for v in audio_params.values()):
+            self._set_error('Audio feature settings must be positive.')
+            return
+
         self._status.color = (0.65, 0.90, 0.65, 1)
         self._status.text  = 'Initializing...'
         self._launch_btn.disabled = True
-        self._on_launch_cb(rec_dir, csv_dir, audio_dir)
+        self._on_launch_cb(rec_dir, csv_dir, audio_dir, audio_params)
 
     def reset(self):
         """Restore the screen to its ready state (called when returning from a project)."""
@@ -276,6 +319,34 @@ def _thin_divider() -> Widget:
     d.bind(pos=lambda *_: setattr(rect, 'pos', d.pos),
            size=lambda *_: setattr(rect, 'size', d.size))
     return d
+
+
+def _num_field(row: BoxLayout, label_text: str, default: int) -> TextInput:
+    """Append a labelled integer field to *row*. Returns the TextInput."""
+    lbl = Label(
+        text=label_text,
+        size_hint_x=None, width=dp(110),
+        font_size=sp(13),
+        color=(0.75, 0.78, 0.84, 1),
+        halign='right', valign='middle',
+    )
+    lbl.bind(size=lbl.setter('text_size'))
+
+    ti = TextInput(
+        text=str(default),
+        multiline=False,
+        input_filter='int',
+        font_size=sp(13),
+        size_hint_x=1,
+        size_hint_y=1,
+        background_color=(0.11, 0.11, 0.13, 1),
+        foreground_color=(0.95, 0.95, 0.95, 1),
+        cursor_color=(1, 1, 1, 1),
+    )
+
+    row.add_widget(lbl)
+    row.add_widget(ti)
+    return ti
 
 
 def _dir_row(parent: BoxLayout, label_text: str,

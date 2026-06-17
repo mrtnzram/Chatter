@@ -281,9 +281,9 @@ class ChatterScreen(Screen):
         top_bar = BoxLayout(size_hint_y=None, spacing=12)
         top_bar.bind(minimum_height=top_bar.setter('height'))
         hint = Label(
-            text='Drag to scroll  ·  Shift + Drag to add a bout  ·  Cmd/Ctrl + Drag a boundary line to edit it',
+            text='Drag to scroll  ·  Shift + Drag to add a bout  ·  Cmd/Ctrl + Drag a boundary line to edit it  ·  left / right to switch recordings · up / down to navigate bouts',
             size_hint_x=1, size_hint_y=None,
-            font_size=sp(20), color=(0.6, 0.6, 0.65, 1),
+            font_size=sp(15), color=(0.6, 0.6, 0.65, 1),
             halign='left', valign='top',
         )
         hint.bind(width=lambda inst, w: setattr(inst, 'text_size', (w, None)))
@@ -371,6 +371,19 @@ class ChatterScreen(Screen):
     # ------------------------------------------------------------------
 
     def _on_key_down(self, window, key, scancode, codepoint, modifier):
+        # Don't hijack arrow keys while the user is typing in a text field
+        # (parameter values, onset/offset) — let the field handle them.
+        if self._text_input_focused():
+            return False
+
+        # Left/right arrows → previous/next recording (work even with no bouts)
+        if key == 276:   # left arrow → previous recording
+            self._on_prev_bird()
+            return True
+        if key == 275:   # right arrow → next recording
+            self._on_next_bird()
+            return True
+
         bouts = self.ctrl.current_bouts.get(self._current_idx, [])
         if not bouts:
             return False
@@ -389,6 +402,13 @@ class ChatterScreen(Screen):
         self._bout_list.set_selection([new_id])
         self._scroll_spec_to_bout(new_id)
         return True
+
+    def _text_input_focused(self) -> bool:
+        """True if any TextInput within this screen currently has focus."""
+        for w in self.walk(restrict=True):
+            if isinstance(w, TextInput) and w.focus:
+                return True
+        return False
 
     def _scroll_spec_to_bout(self, bout_id: int):
         """Scroll the spectrogram so the selected bout is centred in the viewport."""
