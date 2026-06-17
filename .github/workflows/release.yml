@@ -61,6 +61,12 @@ jobs:
 
       - name: Build with PyInstaller
         working-directory: chatter_app
+        # KIVY_GL_BACKEND=mock keeps Kivy's build-time provider probe from
+        # initializing real OpenGL — the CI runners have no GPU (Windows reports
+        # OpenGL 1.1 / GDI Generic) and would otherwise abort the build. This is
+        # build-time only; the shipped app uses the real GPU on the user's machine.
+        env:
+          KIVY_GL_BACKEND: mock
         run: pyinstaller Chatter.spec --noconfirm
 
       - name: Package macOS app (zip via ditto)

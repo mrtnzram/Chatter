@@ -38,6 +38,16 @@ if IS_WIN:
 datas = [('assets', 'assets')]
 binaries = []
 hiddenimports = [
+    # Kivy SDL2 core providers. Kivy's get_deps_minimal() decides which core
+    # providers to bundle by *probing which import at build time*. On a headless
+    # CI runner (no display) the SDL2 window provider fails that probe and gets
+    # silently dropped, so the frozen app aborts with "Unable to get a Window".
+    # Force-include them so the build never depends on the probe.
+    'kivy.core.window.window_sdl2',
+    'kivy.core.text.text_sdl2',
+    'kivy.core.image.img_sdl2',
+    'kivy.core.clipboard.clipboard_sdl2',
+    'kivy.core.audio.audio_sdl2',
     # matplotlib renders off-thread with the Agg backend -> Kivy Texture
     'matplotlib.backends.backend_agg',
     # scipy submodules used by the detection pipeline
