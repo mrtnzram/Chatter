@@ -2,73 +2,146 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Setup
+## Repository layout
 
-Dependencies are managed with [uv](https://docs.astral.sh/uv/). There is no `requirements.txt`.
+```
+Chatter/
+├── notebook/               # Jupyter notebook implementation (research/legacy)
+│   ├── Chatter.ipynb       # Entry point
+│   ├── audio_utils.py      # Audio processing + feature extraction
+│   ├── chatter_core.py     # ipywidgets UI
+│   ├── chatter_store.py    # DuckDB data layer
+│   └── visualizations.py  # matplotlib / HTML spectrogram helpers
+├── chatter_app/            # Kivy desktop application (primary)
+│   ├── main.py             # App entry point (WelcomeScreen → ChatterScreen)
+│   ├── core/
+│   │   ├── audio_utils.py        # Same as notebook/ version
+│   │   ├── chatter_controller.py # Bridges UI to store + extractor
+│   │   ├── chatter_store.py      # Same as notebook/ version
+│   │   └── visualizations.py    # Same as notebook/ version
+│   ├── screens/
+│   │   ├── welcome_screen.py     # Landing page (directory pickers)
+│   │   └── chatter_screen.py    # Main analysis screen
+│   └── widgets/
+│       ├── bout_list.py          # RecycleView multi-select bout list
+│       ├── param_input.py        # Labelled float TextInput
+│       └── spectrogram_view.py  # Tiled spectrogram canvas + drag editing
+├── BirdNETmodel/           # Optional TFLite models (use_birdnet=True)
+├── Songs/                  # Sample WAV files for testing
+├── pyproject.toml          # Project dependencies (uv / pip)
+└── chatter_app/requirements_kivy.txt  # Kivy-specific deps
+```
+
+There is no test suite and no linter configuration.
+
+---
+
+## Setup — Jupyter notebook
 
 ```bash
-uv sync                  # installs all base dependencies into .venv
-uv sync --extra birdnet  # also installs birdnetlib + tensorflow for BirdNET support
-uv run jupyter lab       # then open Chatter.ipynb
+# Install dependencies (uv recommended, or pip)
+uv sync
+# or: pip install -e .
+
+cd notebook
+jupyter lab
+# Then open Chatter.ipynb
 ```
 
-`pyproject.toml` declares direct dependencies; `uv.lock` pins the full resolved set. There is no test suite and no linter configuration.
+## Setup — Kivy desktop app
 
-## Architecture
+```bash
+pip install -r chatter_app/requirements_kivy.txt
 
-Chatter is a Jupyter-notebook-based tool for semi-automatic segmentation of bird song recordings into "bouts" (discrete song segments). The entry point is `Chatter.ipynb`; the four `.py` modules are imported by the notebook.
-
-### Module responsibilities
-
-**[audio_utils.py](audio_utils.py)** — All audio processing logic:
-- `create_initial_dataset(root_dir)` — Walks a directory of `.wav` files and returns a pandas DataFrame. Requires filenames in the format `Genus-species-birdid.wav` (e.g., `Melospiza-melodia-599851.wav`); the parser splits on `-` to extract `species` and `bird_id`.
-- `AudioFeatureExtractor` — The core detection engine. Its `compute_all_features(row)` runs the full pipeline: load audio → high-pass filter → normalize → compute spectral flux / MFCCs / RMS energy → detect active regions → refine with MFCC variance and energy thresholds → merge short silences → filter short bouts → flag outlier bouts via cosine distance. Optionally runs BirdNET or a custom sklearn model for post-classification. All detection parameters are attributes set on the extractor instance (not passed per-call), so `Chatter` modifies them directly when widget values change.
-
-**[chatter_store.py](chatter_store.py)** — Data-access layer (two DuckDB connections):
-- `ChatterStore(duckdb_path, csv_path, spectro_cache_cap)` — owns all storage. Never import or query DuckDB directly from `chatter_core.py`; go through this wrapper.
-- **Persistent connection** (`chatter.duckdb`): `bouts` table, PK `(species, bird_id, song_id, bout_id)`. `upsert_bouts(bout_rows)` replaces all bouts for a recording on each export (delete-then-insert per `song_id`). `get_bouts_df()` queries it. `export_bouts_csv()` writes it to `bouts.csv`.
-- **Ephemeral connection** (`:memory:`): `spectrogram_cache` table, gzip-compressed `np.save` BLOBs, keyed by `sha256(wav_location|sr|hop_length|frame_length)`. LRU cap (default 8 entries) is tracked in a Python `OrderedDict`; the `:memory:` connection is never written to disk and is freed on process exit or `close()`. `get_cached_spectrogram(key)` returns `(S_db, sr)` or `None` on miss; `set_cached_spectrogram(key, S_db, sr)` stores and enforces the cap.
-- **CSV migration**: on first launch, if `bouts.csv` exists and the `bouts` table is empty, the CSV is imported once so prior sessions are not lost.
-- `get_bouts_csv_df()` — reads `bouts.csv` from disk directly (used by `chatter.bouts_df`).
-
-**[chatter_core.py](chatter_core.py)** — The interactive widget UI:
-- `Chatter(df, extractor, bouts_csv=None, duckdb_path="chatter.duckdb")` — Wraps `AudioFeatureExtractor` and `df` in an `ipywidgets` interface. Constructs a `ChatterStore` on init; reconciles saved bouts (from DuckDB) back into `df['bouts']` grouped by `(species, bird_id, song_id)`. Per-bird parameter state is stored in `self.bird_params`.
-- `chatter.bouts_df` — **property** that reads `bouts.csv` from disk (via `store.get_bouts_csv_df()`), not DuckDB. This is what the notebook previews.
-- `get_cached_spectrogram(wav_location, audio, sr)` — checks the ephemeral cache first; computes and stores on miss. Cache key includes `hop_length` and `frame_length` so changing `sr` invalidates it but tweaking MFCC thresholds does not.
-- `_on_save_bouts_clicked` — builds `bout_rows`, calls `store.upsert_bouts()` then `store.export_bouts_csv()`. DuckDB is the write-path; `bouts.csv` is produced as a side effect for back-compat.
-- Bout-editing handlers (`_on_update_bout_clicked`, `on_add_bout_clicked`, `_on_remove_bouts_clicked`, `_on_not_outlier_clicked`) stay **pure in-memory pandas** — they mutate `self.current_bouts` / `self.df` only. Data reaches DuckDB/CSV only at Export time.
-- `close()` — shuts down both DuckDB connections cleanly. Call this at the end of a notebook session.
-
-**[visualizations.py](visualizations.py)** — Plotting helpers:
-- `plot_spectrogram_base_from_row` — Renders the base spectrogram (STFT) as a matplotlib figure; returns `(fig, ax, S_db, duration)` so overlays can be added to the same axes without re-computing the STFT.
-- `plot_bout_overlays` — Draws bout spans (green = normal, red = outlier), onset/offset lines, and inter-bout interval brackets onto an existing axis.
-- `show_scrollable_figure` — Encodes a figure as base64 PNG and renders it inside a horizontally-scrollable HTML `<div>`, which is necessary because long recordings produce very wide spectrograms.
-
-### Data flow
-
-```
-root_dir/
-  Genus-species-birdid.wav   →  create_initial_dataset()  →  df (one row per file)
-                                                              ↓
-                                           AudioFeatureExtractor.compute_all_features()
-                                                              ↓
-                                    df['bouts'] = [{onset, offset, wavstart, wavend, outlier_flag}, ...]
-                                                              ↓
-                                              Chatter widget (interactive editing)
-                                                              ↓
-                            store.upsert_bouts() → chatter.duckdb  →  store.export_bouts_csv()
-                                                                               ↓
-                            bouts_audio/<species>_<bird_id>_bout<N>.wav  +  bouts.csv
+cd chatter_app
+python main.py
 ```
 
-### Key data structures
+---
+
+## Architecture — Kivy app (`chatter_app/`)
+
+The desktop app is the actively developed version. It opens a **WelcomeScreen** where the user selects three directories, then transitions to **ChatterScreen** for interactive bout segmentation.
+
+### Screens
+
+**[chatter_app/screens/welcome_screen.py](chatter_app/screens/welcome_screen.py)**
+- Directory pickers for recording dir, CSV export dir, and bouts audio dir
+- Auto-derives csv/audio dirs from the recording dir's parent
+- Calls back into `ChatterApp._on_launch()` which spins a background thread for dataset scanning
+
+**[chatter_app/screens/chatter_screen.py](chatter_app/screens/chatter_screen.py)**
+- Full analysis UI: bird spinner, parameter rows, bout list, onset/offset editing, spectrogram
+- "New Project" button (top-right) triggers a confirmation popup and returns to WelcomeScreen
+- All slow operations (recompute, finalize, export) run on background threads; results marshalled back via `Clock.schedule_once()`
+
+### Widgets
+
+**[chatter_app/widgets/spectrogram_view.py](chatter_app/widgets/spectrogram_view.py)**
+- Tiled STFT spectrogram rendered on a Kivy canvas
+- Drag-to-scroll; Shift+drag adds a new bout; Cmd/Ctrl+drag moves a bout boundary
+
+**[chatter_app/widgets/bout_list.py](chatter_app/widgets/bout_list.py)**
+- `RecycleView`-based list with multi-select (Shift+click) support
+
+**[chatter_app/widgets/param_input.py](chatter_app/widgets/param_input.py)**
+- Labelled float `TextInput` that commits on Enter or focus loss
+
+### Core
+
+**[chatter_app/core/chatter_controller.py](chatter_app/core/chatter_controller.py)**
+- Owns the `df` DataFrame, `AudioFeatureExtractor`, and `ChatterStore`
+- `recompute(idx, params)` — runs the full detection pipeline for one recording
+- `finalize(idx)` — marks detection parameters as final
+- `export(idx, output_dir)` — writes audio clips to `output_dir/` and persists bouts to DuckDB + CSV
+- `get_cached_spectrogram(wav_path, audio, sr)` — delegates to the store's in-memory STFT cache
+- `close()` — must be called when switching projects to release the DuckDB file lock
+
+**[chatter_app/core/audio_utils.py](chatter_app/core/audio_utils.py)** — same as `notebook/audio_utils.py`
+
+**[chatter_app/core/chatter_store.py](chatter_app/core/chatter_store.py)** — same as `notebook/chatter_store.py`
+
+### App lifecycle / multi-project
+
+`ChatterApp` (in `main.py`) manages `ScreenManager` transitions:
+
+1. `WelcomeScreen` is created once and stays in the manager permanently
+2. On Launch: background thread scans wav files → creates `ChatterController` → adds `ChatterScreen`
+3. On "New Project": fade to WelcomeScreen → after 0.4 s (transition complete) remove `ChatterScreen` and call `ctrl.close()` to release DuckDB
+
+---
+
+## Architecture — Jupyter notebook (`notebook/`)
+
+The notebook implementation is the original research tool, kept for reference.
+
+**[notebook/audio_utils.py](notebook/audio_utils.py)** — Audio processing logic:
+- `create_initial_dataset(root_dir)` — Walks a directory of `.wav` files and returns a pandas DataFrame. Requires filenames in the format `Genus-species-birdid.wav`; splits on `-` to extract `species` and `bird_id`.
+- `AudioFeatureExtractor` — Core detection engine. `compute_all_features(row)` runs: load audio → high-pass filter → normalize → compute spectral flux / MFCCs / RMS energy → detect active regions → refine with MFCC variance and energy thresholds → merge short silences → filter short bouts → flag outlier bouts via cosine distance. Optionally runs BirdNET or a custom sklearn model.
+
+**[notebook/chatter_core.py](notebook/chatter_core.py)** — ipywidgets UI:
+- `Chatter(df, extractor, bouts_csv=None)` — Interactive widget wrapping `AudioFeatureExtractor`. Re-runs the full pipeline on every parameter change. Spectrogram images are cached in `self.spectrogram_cache`. Per-bird parameter state is stored in `self.bird_params`. `Export Bouts` writes audio clips to `bouts_audio/` and persists to DuckDB + CSV.
+
+**[notebook/chatter_store.py](notebook/chatter_store.py)** — DuckDB data layer:
+- Two connections: persistent (`chatter.duckdb` on disk for bouts) and ephemeral (`:memory:` for spectrogram cache with LRU eviction)
+- Migrates a pre-existing `bouts.csv` into DuckDB on first run
+
+**[notebook/visualizations.py](notebook/visualizations.py)** — Plotting helpers:
+- `plot_spectrogram_base_from_row` — Renders STFT spectrogram; returns `(fig, ax, S_db, duration)`
+- `plot_bout_overlays` — Draws bout spans, onset/offset lines, and inter-bout interval brackets
+- `show_scrollable_figure` — Encodes a figure as base64 PNG in a horizontally-scrollable HTML `<div>`
+
+---
+
+## Shared data structures
+
+These are the same in both implementations:
 
 - **`df`** (main DataFrame): one row per recording. Key columns: `species`, `bird_id`, `wav_location`, `song_id`, `audio` (numpy array), `sr`, `bouts` (list of dicts), plus feature arrays (`mfcc`, `spectral_flux`, `rms_energy`, `active_regions`, `refined_regions`).
-- **`bouts`** (list of dicts per row): each dict has `onset`, `offset` (unpadded, seconds), `wavstart`, `wavend` (padded for export), and optionally `outlier_flag` (1 = outlier), `birdnet_flag`.
-- **`bouts.csv`** / `chatter.bouts_df`: flattened export; one row per bout. Columns: `species`, `bird_id`, `wav_location`, `song_id`, `bout_id`, `duration`, `onset`, `offset`, `wavstart`, `wavend`, `intersong_interval`, `bout_wav`. The PK in DuckDB is `(species, bird_id, song_id, bout_id)` — multiple recordings of the same bird coexist via `song_id`.
-- **`chatter.duckdb`**: persistent DuckDB file created in CWD at notebook runtime. Gitignored; user data, not source.
+- **`bouts`** (list of dicts per row): each dict has `onset`, `offset` (unpadded seconds), `wavstart`, `wavend` (padded for export), and optionally `outlier_flag` (1 = outlier), `birdnet_flag`.
+- **`bouts.csv` / DuckDB `bouts` table**: flattened export — one row per bout with `species`, `bird_id`, `song_id`, `bout_id`, `duration`, `onset`, `offset`, `wavstart`, `wavend`, `intersong_interval`, `bout_wav`.
 
-### Optional ML classifiers
+## Optional ML classifiers
 
 - **Custom model**: pass a joblib-serialized sklearn model path to `AudioFeatureExtractor(model='path/to/model.pkl')`. Must accept feature vectors of shape `(n_mfcc * 2,)` (MFCC mean + std per bout).
-- **BirdNET**: set `use_birdnet=True` and `birdnet_model_path='BirdNETmodel/...'`. Requires `uv sync --extra birdnet`. The TFLite model files are stored in `BirdNETmodel/`.
+- **BirdNET**: set `use_birdnet=True` and `birdnet_model_path='BirdNETmodel/...'`. Requires `birdnetlib`. TFLite model files are in `BirdNETmodel/`.

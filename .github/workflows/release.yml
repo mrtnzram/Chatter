@@ -1,0 +1,102 @@
+name: Build & Release
+
+# Triggers:
+#   - Pushing a version tag like v0.1.0 builds AND publishes a (draft) Release.
+#   - "Run workflow" button (workflow_dispatch) builds only, no Release.
+#     Use this to test the build before ever cutting a tag.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed for the release job to create a GitHub Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r chatter_app/requirements_kivy.txt
+          pip install pyinstaller pillow
+
+      - name: Install Kivy SDL2/GLEW DLLs (Windows only)
+        if: runner.os == 'Windows'
+        run: pip install kivy_deps.sdl2 kivy_deps.glew kivy_deps.angle
+
+      - name: Generate Windows icon (Chatter.ico)
+        if: runner.os == 'Windows'
+        working-directory: chatter_app
+        run: |
+          python -c "from PIL import Image; Image.open('assets/zebrafinch.png').save('Chatter.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])"
+
+      - name: Generate macOS icon (Chatter.icns)
+        if: runner.os == 'macOS'
+        working-directory: chatter_app
+        run: |
+          set -e
+          mkdir -p Chatter.iconset
+          for size in 16 32 64 128 256 512; do
+            sips -z $size $size assets/zebrafinch.png --out "Chatter.iconset/icon_${size}x${size}.png"
+            double=$((size * 2))
+            sips -z $double $double assets/zebrafinch.png --out "Chatter.iconset/icon_${size}x${size}@2x.png"
+          done
+          iconutil -c icns Chatter.iconset -o Chatter.icns
+
+      - name: Build with PyInstaller
+        working-directory: chatter_app
+        run: pyinstaller Chatter.spec --noconfirm
+
+      - name: Package macOS app (zip via ditto)
+        if: runner.os == 'macOS'
+        working-directory: chatter_app
+        run: ditto -c -k --keepParent dist/Chatter.app dist/Chatter-macos.zip
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chatter-windows
+          path: chatter_app/dist/Chatter.exe
+          if-no-files-found: error
+
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chatter-macos
+          path: chatter_app/dist/Chatter-macos.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true
+          generate_release_notes: true
