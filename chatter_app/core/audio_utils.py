@@ -1,3 +1,4 @@
+import math
 import os
 import numpy as np
 import pandas as pd
@@ -15,26 +16,51 @@ except ImportError:
     Recording = None
     Model = None
 
+_CHUNK_SECS = 120.0  # 2 minutes
+
+
 def create_initial_dataset(root_dir):
     data = []
     for root, dirs, files in os.walk(root_dir):
-        for file in files:
+        for file in sorted(files):
             if file.endswith('.wav'):
                 parts = file.replace('.wav', '').split('-')
-                if len(parts) >= 2:
+                if len(parts) >= 3:
                     species = parts[0] + "-" + parts[1]
                     bird_id = parts[2]
                 else:
                     species = "unknown"
                     bird_id = "unknown"
                 wav_location = os.path.join(root, file)
-                data.append({
-                    'species': species,
-                    'bird_id': bird_id,
-                    'wav_location': wav_location,
-                    'song_id': 0
-                })
+                duration = sf.info(wav_location).duration
+                if duration > _CHUNK_SECS:
+                    n = math.ceil(duration / _CHUNK_SECS)
+                    for i in range(n):
+                        data.append({
+                            'species': species,
+                            'bird_id': bird_id,
+                            'wav_location': wav_location,
+                            'song_id': 0,
+                            'chunk_start': i * _CHUNK_SECS,
+                            'chunk_end': min((i + 1) * _CHUNK_SECS, duration),
+                            'chunk_num': i + 1,
+                            'n_chunks': n,
+                        })
+                else:
+                    data.append({
+                        'species': species,
+                        'bird_id': bird_id,
+                        'wav_location': wav_location,
+                        'song_id': 0,
+                        'chunk_start': 0.0,
+                        'chunk_end': duration,
+                        'chunk_num': 0,
+                        'n_chunks': 1,
+                    })
     df = pd.DataFrame(data)
+    df = df.sort_values('wav_location').reset_index(drop=True)
+    df['bird_id'] = df['bird_id'].astype(str)
+    df['species'] = df['species'].astype(str)
     df['song_id'] = df.groupby('species').cumcount()
     return df
 
@@ -149,14 +175,10 @@ class AudioFeatureExtractor:
         outlier_flags = avg_dist > (median + threshold * mad)
         return outlier_flags.astype(int)  # 1 = outlier, 0 = not
 
-    def load_audio(self, wav_path):
-        # Load audio
-        audio, sr = librosa.load(wav_path, sr=self.sr)
-        # Remove low-decibel values
-        audio = remove_low_amplitude(audio, threshold_db=-30)  # Adjust threshold as needed
-        # High-pass filter to remove low-frequency noise
-        audio = highpass_filter(audio, sr, cutoff=500)  # Adjust cutoff as needed
-        # Normalize
+    def load_audio(self, wav_path, offset=0.0, duration=None):
+        audio, sr = librosa.load(wav_path, sr=self.sr, offset=offset, duration=duration)
+        audio = remove_low_amplitude(audio, threshold_db=-30)
+        audio = highpass_filter(audio, sr, cutoff=500)
         if np.max(np.abs(audio)) > 0:
             audio = audio / np.max(np.abs(audio))
         return audio, sr

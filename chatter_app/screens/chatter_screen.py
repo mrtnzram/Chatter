@@ -35,6 +35,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.effects.dampedscroll import DampedScrollEffect
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.graphics import Color as GColor, Rectangle as GRect
 from kivy.lang import Builder
 from kivy.uix.boxlayout import BoxLayout
@@ -127,8 +128,8 @@ class ChatterScreen(Screen):
 
         # Populate bird list and trigger initial load
         options = self.ctrl.get_bird_options()
-        self._bird_spinner.values = [label for label, _ in options]
-        self._bird_index_map = {label: idx for label, idx in options}
+        self._bird_spinner.values = [label for label, _, _ in options]
+        self._bird_index_map = {label: idx for label, idx, _ in options}
         if options:
             self._bird_spinner.text = options[0][0]
             # Initial load happens via on_text binding
@@ -159,7 +160,20 @@ class ChatterScreen(Screen):
             # Bounded, scrollable dropdown list
             dropdown_cls=partial(DropDown, max_height=360),
         )
+        self._prev_btn = _btn(row1, '< Prev',
+                              bg=(0.18, 0.35, 0.55, 1), width=90, height=56,
+                              font_size=15)
         row1.add_widget(self._bird_spinner)
+        self._next_btn = _btn(row1, 'Next >',
+                              bg=(0.18, 0.35, 0.55, 1), width=90, height=56,
+                              font_size=15)
+        self._exported_label = Label(
+            text='', color=(0.25, 0.85, 0.45, 1),
+            size_hint_x=None, width=dp(160),
+            font_size=sp(14), halign='center', valign='middle',
+        )
+        self._exported_label.bind(size=self._exported_label.setter('text_size'))
+        row1.add_widget(self._exported_label)
         self._back_btn = _btn(row1, 'New Project',
                               bg=(0.20, 0.20, 0.25, 1), width=150, height=56,
                               font_size=17)
@@ -168,19 +182,23 @@ class ChatterScreen(Screen):
         # Divider separating the bird selector from the parameter rows
         _divider(ctrl_panel)
 
-        # Row 2: Detection params A (compact: label beside input)
-        row2 = BoxLayout(size_hint_y=None, height=50, spacing=20)
+        # Row 2: Detection params A — centred in the available width
+        row2_wrap = AnchorLayout(size_hint_y=None, height=50, anchor_x='center')
+        row2 = BoxLayout(size_hint_x=0.75, spacing=20)
         self._mfcc_thresh = _param_input(row2, 'MFCC Thresh:', 0.5)
         self._energy_thresh = _param_input(row2, 'Energy Thresh:', 0.1)
         self._active_thresh = _param_input(row2, 'Active Region Thresh:', 0.001)
-        ctrl_panel.add_widget(row2)
+        row2_wrap.add_widget(row2)
+        ctrl_panel.add_widget(row2_wrap)
 
-        # Row 3: Detection params B
-        row3 = BoxLayout(size_hint_y=None, height=50, spacing=20)
+        # Row 3: Detection params B — centred in the available width
+        row3_wrap = AnchorLayout(size_hint_y=None, height=50, anchor_x='center')
+        row3 = BoxLayout(size_hint_x=0.75, spacing=20)
         self._min_silence = _param_input(row3, 'Min Silence:', 0.9)
         self._min_bout_len = _param_input(row3, 'Min Bout Len:', 1.0)
         self._pad = _param_input(row3, 'Pad:', 0.5)
-        ctrl_panel.add_widget(row3)
+        row3_wrap.add_widget(row3)
+        ctrl_panel.add_widget(row3_wrap)
 
         _divider(ctrl_panel)
 
@@ -306,10 +324,12 @@ class ChatterScreen(Screen):
         # Bird selection
         self._bird_spinner.bind(text=self._on_bird_selected)
 
-        # Param commits → trigger recompute
+        # Param commits → force re-detection with new params
         for pi in (self._mfcc_thresh, self._energy_thresh, self._active_thresh,
-                   self._min_silence, self._min_bout_len, self._pad):
-            pi.on_commit = lambda _: self._schedule_recompute()
+                   self._min_silence, self._min_bout_len):
+            pi.on_commit = lambda _: self._schedule_recompute(force=True)
+        # Pad only affects clip boundaries (wavstart/wavend), not detection
+        self._pad.on_commit = lambda _: self._schedule_recompute(force=False)
 
         # Zoom / minor-tick → base re-render only (no feature recompute)
         self._zoom_slider.bind(value=self._on_zoom_changed)
@@ -327,6 +347,10 @@ class ChatterScreen(Screen):
         self._remove_btn.bind(on_release=self._on_remove_bouts)
         self._not_outlier_btn.bind(on_release=self._on_mark_not_outlier)
 
+        # Prev / Next bird navigation
+        self._prev_btn.bind(on_release=self._on_prev_bird)
+        self._next_btn.bind(on_release=self._on_next_bird)
+
         # Action buttons
         self._back_btn.bind(on_release=self._on_back)
         self._finalize_btn.bind(on_release=self._on_finalize)
@@ -337,6 +361,7 @@ class ChatterScreen(Screen):
         self._spec_view.on_offset_live = self._on_offset_live
         self._spec_view.on_bout_updated = self._on_drag_commit_update
         self._spec_view.on_bout_added = self._on_drag_commit_add
+        self._spec_view.on_bout_selected = self._on_spec_bout_selected
 
         # Arrow-key bout navigation
         Window.bind(on_key_down=self._on_key_down)
@@ -388,6 +413,26 @@ class ChatterScreen(Screen):
     # Bird selection
     # ------------------------------------------------------------------
 
+    def _on_prev_bird(self, *_):
+        values = self._bird_spinner.values
+        if not values:
+            return
+        try:
+            pos = list(values).index(self._bird_spinner.text)
+        except ValueError:
+            pos = 0
+        self._bird_spinner.text = values[(pos - 1) % len(values)]
+
+    def _on_next_bird(self, *_):
+        values = self._bird_spinner.values
+        if not values:
+            return
+        try:
+            pos = list(values).index(self._bird_spinner.text)
+        except ValueError:
+            pos = 0
+        self._bird_spinner.text = values[(pos + 1) % len(values)]
+
     def _on_bird_selected(self, spinner, text):
         if not text or text not in self._bird_index_map:
             return
@@ -399,29 +444,32 @@ class ChatterScreen(Screen):
         # Clear spectrogram while loading
         self._spec_view.clear()
         self._bout_list.set_bouts([])
-        self._set_status('Loading…')
+        self._set_status('Loading...')
+        self._update_exported_label()
         self._schedule_recompute()
 
     # ------------------------------------------------------------------
     # Recompute pipeline (threaded)
     # ------------------------------------------------------------------
 
-    def _schedule_recompute(self):
+    def _schedule_recompute(self, force: bool = False):
         if self._busy:
             return
         self._busy = True
-        self._loading_label.text = '⏳ Computing…'
-        self._set_status('Running feature detection…')
+        self._loading_label.text = 'Computing...'
+        self._set_status('Running feature detection...')
         params = self._read_params()
         idx = self._current_idx
 
         def _worker():
             try:
-                bouts, features = self.ctrl.recompute(idx, params)
+                bouts, features = self.ctrl.recompute(idx, params, force=force)
                 # Also prepare the spectrogram texture off-thread
                 row = self.ctrl.df.iloc[idx]
+                chunk_start = float(row.get('chunk_start') or 0.0)
                 S_db, sr = self.ctrl.get_cached_spectrogram(
-                    row['wav_location'], row['audio'], row['sr']
+                    row['wav_location'], row['audio'], row['sr'],
+                    chunk_start=chunk_start,
                 )
                 zoom = self._zoom_slider.value
                 minor = self._read_minor_tick()
@@ -436,7 +484,9 @@ class ChatterScreen(Screen):
                 )
             except Exception as exc:
                 Clock.schedule_once(
-                    partial(self._set_status, f'Error: {exc}'), 0
+                    partial(self._set_status,
+                            f'Could not load recording: {exc}. '
+                            'Check that the file exists and is a valid WAV.'), 0
                 )
                 Clock.schedule_once(lambda _: self._set_busy(False), 0)
 
@@ -475,12 +525,15 @@ class ChatterScreen(Screen):
         if not isinstance(row.get('audio'), np.ndarray):
             return
         self._busy = True
-        self._loading_label.text = '⏳ Rendering…'
+        self._loading_label.text = 'Rendering...'
+
+        chunk_start = float(row.get('chunk_start') or 0.0)
 
         def _worker():
             try:
                 S_db, sr = self.ctrl.get_cached_spectrogram(
-                    row['wav_location'], row['audio'], row['sr']
+                    row['wav_location'], row['audio'], row['sr'],
+                    chunk_start=chunk_start,
                 )
                 zoom = self._zoom_slider.value
                 minor = self._read_minor_tick()
@@ -493,9 +546,11 @@ class ChatterScreen(Screen):
                 Clock.schedule_once(
                     partial(self._on_base_done, tiles, geometry, bouts, sel), 0
                 )
-            except Exception as exc:
+            except Exception:
                 Clock.schedule_once(
-                    partial(self._set_status, f'Render error: {exc}'), 0
+                    partial(self._set_status,
+                            'Could not render spectrogram. '
+                            'Try zooming out or increasing the minor tick step.'), 0
                 )
                 Clock.schedule_once(lambda _: self._set_busy(False), 0)
 
@@ -519,6 +574,10 @@ class ChatterScreen(Screen):
                 self._onset_input.text = f'{bouts[bid]["onset"]:.3f}'
                 self._offset_input.text = f'{bouts[bid]["offset"]:.3f}'
         self._spec_view.update_bouts(bouts, selected_ids)
+
+    def _on_spec_bout_selected(self, bid: int, extend: bool):
+        """Fired when the user clicks a bout span in the spectrogram."""
+        self._bout_list.select_row(bid, extend=extend)
 
     # ------------------------------------------------------------------
     # Drag live-update (onset/offset boxes stay in sync during drag)
@@ -649,7 +708,7 @@ class ChatterScreen(Screen):
         if self._busy:
             return
         self._busy = True
-        self._loading_label.text = '⏳ Finalizing…'
+        self._loading_label.text = 'Finalizing...'
         idx = self._current_idx
 
         def _worker():
@@ -668,7 +727,7 @@ class ChatterScreen(Screen):
         if self._busy:
             return
         self._busy = True
-        self._loading_label.text = '⏳ Exporting…'
+        self._loading_label.text = 'Exporting...'
         idx = self._current_idx
 
         def _worker():
@@ -681,10 +740,17 @@ class ChatterScreen(Screen):
         self._loading_label.text = ''
         self._set_status(msg)
         self._set_busy(False)
+        self._update_exported_label()
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _update_exported_label(self):
+        if self.ctrl.is_exported(self._current_idx):
+            self._exported_label.text = 'Already exported'
+        else:
+            self._exported_label.text = ''
 
     def _refresh_bouts_after_mutation(self, sel: list | None = None):
         """Sync bout list + spectrogram overlay after any in-memory mutation.

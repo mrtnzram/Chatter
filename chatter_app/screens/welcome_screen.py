@@ -19,12 +19,16 @@ from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 from kivy.metrics import dp, sp
+
+_screen_dir = os.path.dirname(os.path.abspath(__file__))
+_assets_dir = os.path.join(os.path.dirname(_screen_dir), 'assets')
 
 
 class WelcomeScreen(Screen):
@@ -60,22 +64,15 @@ class WelcomeScreen(Screen):
         content.bind(minimum_height=content.setter('height'))
         outer.add_widget(content)
 
-        # ── Logo placeholder ───────────────────────────────────────────
+        # ── Logo ───────────────────────────────────────────────────────
         logo_anchor = AnchorLayout(size_hint_y=None, height=dp(130), anchor_x='center')
-        logo_box = BoxLayout(size_hint=(None, None), size=(dp(130), dp(110)))
-        with logo_box.canvas.before:
-            GColor(0.13, 0.16, 0.22, 1)
-            self._logo_bg = GRect(pos=logo_box.pos, size=logo_box.size)
-        logo_box.bind(
-            pos=lambda *_: setattr(self._logo_bg, 'pos', logo_box.pos),
-            size=lambda *_: setattr(self._logo_bg, 'size', logo_box.size),
+        logo_img = Image(
+            source=os.path.join(_assets_dir, 'zebrafinch.png'),
+            size_hint=(None, None),
+            size=(dp(120), dp(120)),
+            fit_mode='contain',
         )
-        logo_box.add_widget(Label(
-            text='[ logo ]',
-            font_size=sp(13),
-            color=(0.32, 0.36, 0.46, 1),
-        ))
-        logo_anchor.add_widget(logo_box)
+        logo_anchor.add_widget(logo_img)
         content.add_widget(logo_anchor)
 
         # ── Title + subtitle ───────────────────────────────────────────
@@ -251,7 +248,7 @@ class WelcomeScreen(Screen):
             return
 
         self._status.color = (0.65, 0.90, 0.65, 1)
-        self._status.text  = 'Initializing…'
+        self._status.text  = 'Initializing...'
         self._launch_btn.disabled = True
         self._on_launch_cb(rec_dir, csv_dir, audio_dir)
 
@@ -307,7 +304,7 @@ def _dir_row(parent: BoxLayout, label_text: str,
     )
 
     browse_btn = Button(
-        text='Browse…',
+        text='Browse',
         size_hint_x=None, width=dp(90),
         size_hint_y=1,
         font_size=sp(13),

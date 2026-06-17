@@ -64,6 +64,7 @@ from welcome_screen import WelcomeScreen
 
 class ChatterApp(App):
     title = 'Chatter — Bird Song Bout Segmentation'
+    icon = os.path.join(_app_dir, 'assets', 'zebrafinch.png')
 
     def build(self):
         self._sm = ScreenManager(transition=FadeTransition(duration=0.25))

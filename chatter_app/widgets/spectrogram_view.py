@@ -40,6 +40,7 @@ _MAX_TILE_PX = 8192
 _SPEC_HEIGHT_PX = 400  # base spectrogram tile height in pixels
 _SPEC_DPI = 100        # DPI used for the matplotlib render
 _GRAB_PX = 24          # touch hit-test radius around a line
+_SELECT_DRAG_PX = 10   # horizontal movement threshold that cancels a select-tap
 _AXIS_H = 40           # height (px) of the top time-axis ruler strip
 _TICK_FONT = 22        # font size for time-axis labels
 _BOUT_FONT = 30        # font size for bout number labels
@@ -177,7 +178,7 @@ def render_spectrogram_tiles(
 
 
 def _nice_step(target: float) -> float:
-    """Round ``target`` up to the nearest 1/2/5 × 10ⁿ 'nice' number."""
+    """Round ``target`` up to the nearest 1/2/5 × 10ⁿfff 'nice' number."""
     if target <= 0:
         return 1.0
     exp = math.floor(math.log10(target))
@@ -245,12 +246,16 @@ class SpectrogramView(Widget):
         self.add_mode: bool = False
 
         # Drag / add state
-        self._drag_type: Optional[str] = None   # 'onset' | 'offset' | 'add'
+        self._drag_type: Optional[str] = None   # 'onset' | 'offset' | 'add' | 'select'
         self._drag_bout_id: Optional[int] = None
         self._drag_pre_onset: float = 0.0
         self._drag_pre_offset: float = 0.0
         self._draft_onset: Optional[float] = None
         self._draft_offset: Optional[float] = None
+        # Select-tap tracking
+        self._drag_start_lx: float = 0.0
+        self._drag_extend: bool = False   # was Shift held at touch_down?
+        self._drag_cancelled: bool = False
 
         # Callbacks wired by ChatterScreen
         self.on_onset_live: Optional[Callable[[float], None]] = None
@@ -258,6 +263,7 @@ class SpectrogramView(Widget):
         self.on_bout_updated: Optional[Callable[[int, float, float], None]] = None
         self.on_bout_added: Optional[Callable[[float, float], None]] = None
         self.on_seek: Optional[Callable[[float], None]] = None
+        self.on_bout_selected: Optional[Callable[[int, bool], None]] = None
 
         self.bind(size=self._on_size_change)
 
@@ -474,10 +480,28 @@ class SpectrogramView(Widget):
                     self._drag_pre_offset = bout['offset']
                     return True
 
+        # Check if the tap landed inside a bout span → select it.
+        # This runs before the add/shift check so a click on a span is always
+        # treated as selection, not add.  Cmd/Ctrl boundary-drag takes priority
+        # (handled above).  A drag > _SELECT_DRAG_PX cancels the selection so
+        # the user can still scroll by starting from inside a span.
+        shift_held = 'shift' in Window.modifiers
+        if not cmd_ctrl_held:
+            for i, bout in enumerate(self._bouts):
+                x_on = g.time_to_x(bout['onset'])
+                x_off = g.time_to_x(bout['offset'])
+                if x_on <= lx <= x_off:
+                    touch.grab(self)
+                    self._drag_type = 'select'
+                    self._drag_bout_id = i
+                    self._drag_start_lx = lx
+                    self._drag_extend = shift_held
+                    self._drag_cancelled = False
+                    return True
+
         # Empty area.  A plain drag falls through to the ScrollView so it can
         # scroll/fling with momentum.  Holding Shift turns the drag into a
         # click-drag-to-add gesture.
-        shift_held = 'shift' in Window.modifiers
         if not (self.add_mode or shift_held):
             return False
 
@@ -517,6 +541,10 @@ class SpectrogramView(Widget):
             if self.on_offset_live:
                 self.on_offset_live(offset)
             self._redraw_overlay()
+
+        elif self._drag_type == 'select':
+            if abs(lx - self._drag_start_lx) > _SELECT_DRAG_PX:
+                self._drag_cancelled = True
 
         return True
 
@@ -559,5 +587,9 @@ class SpectrogramView(Widget):
                 # Treat as a seek click
                 if self.on_seek:
                     self.on_seek(onset)
+
+        elif drag_type == 'select':
+            if not self._drag_cancelled and self.on_bout_selected:
+                self.on_bout_selected(self._drag_bout_id, self._drag_extend)
 
         return True

@@ -38,6 +38,8 @@ class ChatterController:
         self.current_bouts: dict = {}
         # idx → param dict
         self.bird_params: dict = {}
+        # idxs that have been exported to DuckDB + WAV files this session or previously
+        self.exported_idxs: set = set()
         # Ensure columns expected downstream always exist
         for col in ('audio', 'sr', 'bouts'):
             if col not in self.df.columns:
@@ -74,13 +76,19 @@ class ChatterController:
             ).tolist()
             self.df.at[idx, 'bouts'] = bouts
             self.current_bouts[idx] = bouts
+            self.exported_idxs.add(idx)
 
     def get_bird_options(self):
-        """Return [(label, idx), ...] for the bird Spinner."""
-        return [
-            (f"{row['species']} {row['bird_id']}", idx)
-            for idx, row in self.df.iterrows()
-        ]
+        """Return [(label, idx, is_exported), ...] for the bird Spinner."""
+        options = []
+        for idx, row in self.df.iterrows():
+            suffix = f"_{row['chunk_num']}" if row.get('n_chunks', 1) > 1 else ''
+            label = f"{row['species']} {row['bird_id']}{suffix}"
+            options.append((label, idx, idx in self.exported_idxs))
+        return options
+
+    def is_exported(self, idx: int) -> bool:
+        return idx in self.exported_idxs
 
     # ------------------------------------------------------------------
     # Per-bird parameter state
@@ -106,13 +114,13 @@ class ChatterController:
     # Core recompute (run on a background thread)
     # ------------------------------------------------------------------
 
-    def recompute(self, idx: int, params: dict):
+    def recompute(self, idx: int, params: dict, force: bool = False):
         """Load audio, then return bouts.
 
-        If saved bouts exist for this bird (loaded from CSV/DuckDB on startup
-        or from a previous in-session edit), they are used directly and feature
-        detection is skipped.  Detection only runs on a first-time load with no
-        prior saved state.
+        When force=False (default), saved bouts from a prior session or from
+        the initial detection pass are reused without re-running detection.
+        When force=True, detection always reruns with the current params
+        (used when the user explicitly changes a detection parameter).
 
         Returns (bouts, features_dict).
         Call from a background thread; results are safe to read on any thread.
@@ -120,10 +128,22 @@ class ChatterController:
         self.save_params(idx, params)
         self._apply_params(params)
 
+        if force:
+            self.current_bouts.pop(idx, None)
+            self.df.at[idx, 'bouts'] = None
+
         row = self.df.iloc[idx].copy()
         # Lazy audio load — always needed for the spectrogram render.
+        # For chunked recordings use offset/duration to load only the slice.
         if not isinstance(row.get('audio'), np.ndarray):
-            audio, sr = self.extractor.load_audio(row['wav_location'])
+            chunk_start = float(row.get('chunk_start') or 0.0)
+            chunk_end = row.get('chunk_end')
+            chunk_dur = float(chunk_end - chunk_start) if chunk_end is not None else None
+            audio, sr = self.extractor.load_audio(
+                row['wav_location'],
+                offset=chunk_start,
+                duration=chunk_dur,
+            )
             self.df.at[idx, 'audio'] = audio
             self.df.at[idx, 'sr'] = sr
             row['audio'] = audio
@@ -316,6 +336,7 @@ class ChatterController:
 
         self.store.upsert_bouts(bout_rows)
         self.store.export_bouts_csv()
+        self.exported_idxs.add(idx)
         label = f"{row['species']} {row['bird_id']}"
         return True, f'Exported {len(bout_rows)} bouts for {label}.'
 
@@ -323,12 +344,15 @@ class ChatterController:
     # Spectrogram cache (delegates to store)
     # ------------------------------------------------------------------
 
-    def get_cached_spectrogram(self, wav_location, audio, sr):
+    def get_cached_spectrogram(self, wav_location, audio, sr, chunk_start=0.0):
         """Return (S_db, sr) from cache or compute+store on miss."""
         import librosa
 
+        # Include chunk_start in cache key so different chunks of the same file
+        # don't collide.
+        keyed_path = f"{wav_location}@{chunk_start}" if chunk_start else wav_location
         cache_key = ChatterStore.make_cache_key(
-            wav_location, sr, self.extractor.hop_length, self.extractor.frame_length
+            keyed_path, sr, self.extractor.hop_length, self.extractor.frame_length
         )
         cached = self.store.get_cached_spectrogram(cache_key)
         if cached is not None:
