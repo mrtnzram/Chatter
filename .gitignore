@@ -11,3 +11,6 @@ bouts_audio/
 
 # Jupyter artifacts
 .ipynb_checkpoints/
+
+#Claude
+Claude.md

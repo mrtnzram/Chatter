@@ -1,0 +1,15 @@
+kivy>=2.3.0
+numpy
+pandas
+librosa
+scipy
+scikit-learn
+soundfile
+joblib
+duckdb
+matplotlib
+# Optional: BirdNET classification (set use_birdnet=True in main.py)
+# birdnetlib
+# tensorflow
+# Optional: fallback audio provider if SDL2 wav playback fails on a platform
+# ffpyplayer

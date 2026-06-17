@@ -1,0 +1,813 @@
+"""ChatterScreen — the top-level Kivy screen that wires all widgets together.
+
+Layout (top to bottom)
+-----------------------
+1. Bird selector row      (Spinner)
+2. Param row A            (MFCC Thresh | Energy Thresh | Active Region Thresh)
+3. Param row B            (Min Silence | Min Bout Len | Pad)
+4. Bout-select row        (BoutList | Remove Bouts | Mark as Not Outlier)
+5. Bout-edit row          (Onset | Offset | Update Bout | Add Bout)
+6. Action row             (Finalize Parameters | Export Bouts)
+7. Status bar             (one Label for last action feedback)
+8. Zoom row               (Zoom Slider | Minor-tick TextInput)
+-- divider --
+9. Audio player row       (play/pause + position)
+10. Scrollable spectrogram (SpectrogramView inside horizontal ScrollView)
+
+Threading model
+---------------
+Slow operations (recompute, finalize, export) run on a ``threading.Thread``.
+Results are marshalled back to the main thread via ``Clock.schedule_once``.
+Drag interactions on the spectrogram are synchronous (no feature recompute).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import threading
+from functools import partial
+from typing import List, Optional
+
+import numpy as np
+
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.core.window import Window
+from kivy.effects.dampedscroll import DampedScrollEffect
+from kivy.graphics import Color as GColor, Rectangle as GRect
+from kivy.lang import Builder
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
+from kivy.uix.label import Label
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.slider import Slider
+from kivy.uix.spinner import Spinner
+from kivy.uix.textinput import TextInput
+from kivy.uix.popup import Popup
+from kivy.uix.widget import Widget
+from kivy.metrics import dp, sp
+from kivy.uix.screenmanager import Screen
+
+
+class _MomentumScrollEffect(DampedScrollEffect):
+    """Low-friction scroll effect so flings glide instead of stopping abruptly."""
+    friction = 0.01           # default is 0.05 — lower = longer, smoother glide
+    min_velocity = 0.2
+
+# Make core/ importable from this file's location
+_screen_dir = os.path.dirname(__file__)
+_app_dir = os.path.dirname(_screen_dir)
+_core_dir = os.path.join(_app_dir, 'core')
+_widgets_dir = os.path.join(_app_dir, 'widgets')
+for _p in (_core_dir, _widgets_dir, _app_dir):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from chatter_controller import ChatterController
+from spectrogram_view import SpectrogramView, render_spectrogram_tiles
+from bout_list import BoutList
+from param_input import ParamInput
+
+
+# ---------------------------------------------------------------------------
+# KV layout string for the static control rows
+# ---------------------------------------------------------------------------
+
+Builder.load_string("""
+<_RowLabel@Label>:
+    size_hint_x: None
+    width: 140
+    font_size: sp(12)
+    color: 0.75, 0.75, 0.75, 1
+    halign: 'right'
+    valign: 'middle'
+    text_size: self.width - 4, None
+
+<_ActionBtn@Button>:
+    size_hint_x: None
+    width: 160
+    size_hint_y: None
+    height: 36
+    font_size: sp(13)
+
+<_FloatInput@TextInput>:
+    multiline: False
+    input_filter: 'float'
+    size_hint_x: None
+    width: 90
+    size_hint_y: None
+    height: 34
+    font_size: sp(13)
+    background_color: 0.12, 0.12, 0.12, 1
+    foreground_color: 1, 1, 1, 1
+""")
+
+
+# ---------------------------------------------------------------------------
+# ChatterScreen
+# ---------------------------------------------------------------------------
+
+class ChatterScreen(Screen):
+
+    def __init__(self, controller: ChatterController,
+                 bouts_audio_dir: str = 'bouts_audio',
+                 on_back=None, **kwargs):
+        super().__init__(**kwargs)
+        self.ctrl = controller
+        self._bouts_audio_dir = bouts_audio_dir
+        self._on_back_cb = on_back
+        self._busy = False       # True while a background thread is running
+        self._current_idx: int = 0
+        self._zoom_debounce: Optional[object] = None
+
+        self._build_ui()
+        self._connect_callbacks()
+
+        # Populate bird list and trigger initial load
+        options = self.ctrl.get_bird_options()
+        self._bird_spinner.values = [label for label, _ in options]
+        self._bird_index_map = {label: idx for label, idx in options}
+        if options:
+            self._bird_spinner.text = options[0][0]
+            # Initial load happens via on_text binding
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _build_ui(self):
+        root = BoxLayout(orientation='vertical', padding=18, spacing=14)
+        self.add_widget(root)
+
+        # ---- Control panel (auto-sizes to its content so nothing clips) ----
+        ctrl_panel = BoxLayout(orientation='vertical', size_hint_y=None,
+                               spacing=12)
+        ctrl_panel.bind(minimum_height=ctrl_panel.setter('height'))
+        root.add_widget(ctrl_panel)
+
+        # Row 1: Bird selector (its own row, visually separated below)
+        row1 = BoxLayout(size_hint_y=None, height=56, spacing=12)
+        _lbl(row1, 'Select Bird:', font_size=15)
+        self._bird_spinner = Spinner(
+            text='', font_size=sp(18),
+            size_hint_x=1, size_hint_y=1,
+            background_color=(0.18, 0.40, 0.62, 1),
+            background_normal='',
+            color=(1, 1, 1, 1),
+            # Bounded, scrollable dropdown list
+            dropdown_cls=partial(DropDown, max_height=360),
+        )
+        row1.add_widget(self._bird_spinner)
+        self._back_btn = _btn(row1, 'New Project',
+                              bg=(0.20, 0.20, 0.25, 1), width=150, height=56,
+                              font_size=17)
+        ctrl_panel.add_widget(row1)
+
+        # Divider separating the bird selector from the parameter rows
+        _divider(ctrl_panel)
+
+        # Row 2: Detection params A (compact: label beside input)
+        row2 = BoxLayout(size_hint_y=None, height=50, spacing=20)
+        self._mfcc_thresh = _param_input(row2, 'MFCC Thresh:', 0.5)
+        self._energy_thresh = _param_input(row2, 'Energy Thresh:', 0.1)
+        self._active_thresh = _param_input(row2, 'Active Region Thresh:', 0.001)
+        ctrl_panel.add_widget(row2)
+
+        # Row 3: Detection params B
+        row3 = BoxLayout(size_hint_y=None, height=50, spacing=20)
+        self._min_silence = _param_input(row3, 'Min Silence:', 0.9)
+        self._min_bout_len = _param_input(row3, 'Min Bout Len:', 1.0)
+        self._pad = _param_input(row3, 'Pad:', 0.5)
+        ctrl_panel.add_widget(row3)
+
+        _divider(ctrl_panel)
+
+        # Row 4: Bout list (tall — shows several bouts) + Remove + Not Outlier
+        row4 = BoxLayout(size_hint_y=None, height=190, spacing=14)
+        self._bout_list = BoutList(size_hint_x=1, size_hint_y=1)
+        row4.add_widget(self._bout_list)
+        btn_col = BoxLayout(orientation='vertical', size_hint_x=None,
+                            width=dp(230), spacing=12)
+        self._remove_btn = _btn(btn_col, 'Remove Bouts',
+                                bg=(0.65, 0.15, 0.15, 1), height=52,
+                                width=220, font_size=15)
+        self._not_outlier_btn = _btn(btn_col, 'Mark Not Outlier',
+                                     bg=(0.15, 0.35, 0.65, 1), height=52,
+                                     width=220, font_size=15)
+        row4.add_widget(btn_col)
+        ctrl_panel.add_widget(row4)
+
+        # Row 5: Onset / Offset / Update / Add (emphasised — larger fonts)
+        row5 = BoxLayout(size_hint_y=None, height=56, spacing=12)
+        _lbl(row5, 'Onset:')
+        self._onset_input = _float_input(row5, '0.000', font_size=20, width=130)
+        _lbl(row5, 'Offset:')
+        self._offset_input = _float_input(row5, '0.000', font_size=20, width=130)
+        self._update_btn = _btn(row5, 'Update Bout',
+                                bg=(0.65, 0.45, 0.0, 1),
+                                font_size=22, height=56, width=210)
+        self._add_btn = _btn(row5, 'Add Bout',
+                             bg=(0.1, 0.5, 0.1, 1),
+                             font_size=22, height=56, width=210)
+        ctrl_panel.add_widget(row5)
+
+        # Row 6: spacer · Finalize + Export (right)
+        row6 = BoxLayout(size_hint_y=None, height=58, spacing=16,
+                         padding=(10, 0))
+        row6.add_widget(Widget(size_hint_x=1))   # flexible spacer
+        self._finalize_btn = _btn(row6, 'Finalize Parameters',
+                                  bg=(0.1, 0.5, 0.1, 1), height=52,
+                                  width=240, font_size=16)
+        self._export_btn = _btn(row6, 'Export Bouts',
+                                bg=(0.0, 0.35, 0.6, 1), height=52,
+                                width=200, font_size=16)
+        ctrl_panel.add_widget(row6)
+
+        # Status bar — same width-only text_size pattern so font_size works.
+        self._status_label = Label(
+            text='Ready.',
+            size_hint_y=None,
+            font_size=sp(20), color=(0.7, 0.9, 0.7, 1),
+            halign='left', valign='top',
+        )
+        self._status_label.bind(
+            width=lambda inst, w: setattr(inst, 'text_size', (w, None))
+        )
+        self._status_label.bind(
+            texture_size=lambda inst, ts: setattr(inst, 'height', ts[1] + 8)
+        )
+        ctrl_panel.add_widget(self._status_label)
+
+        # Row 7: Zoom + minor tick
+        row7 = BoxLayout(size_hint_y=None, height=48, spacing=14)
+        _lbl(row7, 'Zoom:', font_size=16)
+        self._zoom_slider = Slider(
+            min=0.5, max=3.0, value=1.0, step=0.1,
+            size_hint_x=1, size_hint_y=1,
+        )
+        row7.add_widget(self._zoom_slider)
+        _lbl(row7, 'Minor tick (s):', font_size=16, width=180)
+        self._minor_tick_input = _float_input(row7, '0.1')
+        ctrl_panel.add_widget(row7)
+
+        # ---- Spectrogram area ----------------------------------------
+        spec_area = BoxLayout(orientation='vertical', spacing=10)
+        root.add_widget(spec_area)
+
+        # Top bar: shift-to-add hint + loading indicator.
+        # text_size is bound to width-only (not height) so that font_size
+        # changes actually take effect — binding to self.size clips text to the
+        # fixed box height, making font changes invisible.
+        top_bar = BoxLayout(size_hint_y=None, spacing=12)
+        top_bar.bind(minimum_height=top_bar.setter('height'))
+        hint = Label(
+            text='Drag to scroll  ·  Shift + Drag to add a bout  ·  Cmd/Ctrl + Drag a boundary line to edit it',
+            size_hint_x=1, size_hint_y=None,
+            font_size=sp(20), color=(0.6, 0.6, 0.65, 1),
+            halign='left', valign='top',
+        )
+        hint.bind(width=lambda inst, w: setattr(inst, 'text_size', (w, None)))
+        hint.bind(texture_size=lambda inst, ts: setattr(inst, 'height', ts[1] + 10))
+        top_bar.add_widget(hint)
+        self._loading_label = Label(
+            text='', size_hint_x=None, width=dp(200),
+            font_size=sp(18), color=(1, 0.75, 0.0, 1),
+        )
+        top_bar.add_widget(self._loading_label)
+        spec_area.add_widget(top_bar)
+
+        # Scrollable spectrogram.
+        # scroll_type=['bars', 'content'] enables both the scrollbar and
+        # content-drag/fling scrolling.  A low-friction momentum effect makes
+        # flings glide.  A plain drag scrolls; Shift+drag is captured by the
+        # SpectrogramView to draw a new bout; dragging a bout's onset/offset
+        # line always captures.
+        self._scroll = ScrollView(
+            do_scroll_x=True, do_scroll_y=False,
+            size_hint=(1, 1),
+            scroll_type=['bars', 'content'],
+            scroll_wheel_distance=80,
+            effect_cls=_MomentumScrollEffect,
+            bar_width=16,
+            bar_color=(0.4, 0.6, 1.0, 0.9),
+            bar_inactive_color=(0.3, 0.3, 0.3, 0.6),
+        )
+        self._spec_view = SpectrogramView(size_hint=(None, 1))
+        self._scroll.add_widget(self._spec_view)
+        spec_area.add_widget(self._scroll)
+
+    # ------------------------------------------------------------------
+    # Callback wiring
+    # ------------------------------------------------------------------
+
+    def _connect_callbacks(self):
+        # Bird selection
+        self._bird_spinner.bind(text=self._on_bird_selected)
+
+        # Param commits → trigger recompute
+        for pi in (self._mfcc_thresh, self._energy_thresh, self._active_thresh,
+                   self._min_silence, self._min_bout_len, self._pad):
+            pi.on_commit = lambda _: self._schedule_recompute()
+
+        # Zoom / minor-tick → base re-render only (no feature recompute)
+        self._zoom_slider.bind(value=self._on_zoom_changed)
+        self._minor_tick_input.bind(on_text_validate=lambda inst: self._on_minor_tick_commit())
+        self._minor_tick_input.bind(focus=lambda inst, foc: (
+            self._on_minor_tick_commit() if not foc else None
+        ))
+
+        # Bout list selection → populate onset/offset boxes + spec lines
+        self._bout_list.on_selection = self._on_bout_selection_changed
+
+        # Bout edit buttons
+        self._update_btn.bind(on_release=self._on_update_bout)
+        self._add_btn.bind(on_release=self._on_add_bout)
+        self._remove_btn.bind(on_release=self._on_remove_bouts)
+        self._not_outlier_btn.bind(on_release=self._on_mark_not_outlier)
+
+        # Action buttons
+        self._back_btn.bind(on_release=self._on_back)
+        self._finalize_btn.bind(on_release=self._on_finalize)
+        self._export_btn.bind(on_release=self._on_export)
+
+        # Spectrogram interactive callbacks
+        self._spec_view.on_onset_live = self._on_onset_live
+        self._spec_view.on_offset_live = self._on_offset_live
+        self._spec_view.on_bout_updated = self._on_drag_commit_update
+        self._spec_view.on_bout_added = self._on_drag_commit_add
+
+        # Arrow-key bout navigation
+        Window.bind(on_key_down=self._on_key_down)
+
+    # ------------------------------------------------------------------
+    # Keyboard navigation
+    # ------------------------------------------------------------------
+
+    def _on_key_down(self, window, key, scancode, codepoint, modifier):
+        bouts = self.ctrl.current_bouts.get(self._current_idx, [])
+        if not bouts:
+            return False
+        n = len(bouts)
+        sel = self._bout_list.selected_ids
+
+        if key == 274:   # down arrow → next bout
+            new_id = (sel[0] + 1) if sel else 0
+            new_id = min(new_id, n - 1)
+        elif key == 273:  # up arrow → previous bout
+            new_id = (sel[0] - 1) if sel else n - 1
+            new_id = max(new_id, 0)
+        else:
+            return False
+
+        self._bout_list.set_selection([new_id])
+        self._scroll_spec_to_bout(new_id)
+        return True
+
+    def _scroll_spec_to_bout(self, bout_id: int):
+        """Scroll the spectrogram so the selected bout is centred in the viewport."""
+        bouts = self.ctrl.current_bouts.get(self._current_idx, [])
+        if bout_id >= len(bouts):
+            return
+        g = self._spec_view._geometry
+        if g is None:
+            return
+        bout = bouts[bout_id]
+        center_px = (g.time_to_x(bout['onset']) + g.time_to_x(bout['offset'])) / 2.0
+
+        content_w = self._spec_view.width
+        viewport_w = self._scroll.width
+        if content_w <= viewport_w:
+            return
+
+        target = (center_px - viewport_w / 2.0) / (content_w - viewport_w)
+        self._scroll.scroll_x = float(max(0.0, min(1.0, target)))
+
+    # ------------------------------------------------------------------
+    # Bird selection
+    # ------------------------------------------------------------------
+
+    def _on_bird_selected(self, spinner, text):
+        if not text or text not in self._bird_index_map:
+            return
+        idx = self._bird_index_map[text]
+        self._current_idx = idx
+        # Restore saved params for this bird
+        params = self.ctrl.get_params(idx)
+        self._set_param_widgets(params)
+        # Clear spectrogram while loading
+        self._spec_view.clear()
+        self._bout_list.set_bouts([])
+        self._set_status('Loading…')
+        self._schedule_recompute()
+
+    # ------------------------------------------------------------------
+    # Recompute pipeline (threaded)
+    # ------------------------------------------------------------------
+
+    def _schedule_recompute(self):
+        if self._busy:
+            return
+        self._busy = True
+        self._loading_label.text = '⏳ Computing…'
+        self._set_status('Running feature detection…')
+        params = self._read_params()
+        idx = self._current_idx
+
+        def _worker():
+            try:
+                bouts, features = self.ctrl.recompute(idx, params)
+                # Also prepare the spectrogram texture off-thread
+                row = self.ctrl.df.iloc[idx]
+                S_db, sr = self.ctrl.get_cached_spectrogram(
+                    row['wav_location'], row['audio'], row['sr']
+                )
+                zoom = self._zoom_slider.value
+                minor = self._read_minor_tick()
+                tiles, geometry = render_spectrogram_tiles(
+                    S_db, int(sr), self.ctrl.extractor.hop_length,
+                    zoom_factor=zoom, minor_tick_step=minor,
+                )
+                Clock.schedule_once(
+                    partial(self._on_recompute_done, idx, bouts, tiles, geometry,
+                            row['wav_location']),
+                    0,
+                )
+            except Exception as exc:
+                Clock.schedule_once(
+                    partial(self._set_status, f'Error: {exc}'), 0
+                )
+                Clock.schedule_once(lambda _: self._set_busy(False), 0)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_recompute_done(self, idx, bouts, tiles, geometry, wav_path, dt):
+        if idx != self._current_idx:
+            self._set_busy(False)
+            return
+        self._spec_view.set_base_tiles(tiles, geometry)
+        self._spec_view.update_bouts(bouts, [])
+        self._bout_list.set_bouts(bouts)
+        self._loading_label.text = ''
+        self._set_status(f'Loaded {len(bouts)} bout(s).')
+        self._set_busy(False)
+
+    # ------------------------------------------------------------------
+    # Base re-render (zoom/minor-tick change — no feature recompute)
+    # ------------------------------------------------------------------
+
+    def _on_zoom_changed(self, slider, value):
+        if self._zoom_debounce:
+            self._zoom_debounce.cancel()
+        self._zoom_debounce = Clock.schedule_once(
+            lambda _: self._redraw_base(), 0.25
+        )
+
+    def _on_minor_tick_commit(self, *_):
+        self._redraw_base()
+
+    def _redraw_base(self):
+        if self._busy:
+            return
+        idx = self._current_idx
+        row = self.ctrl.df.iloc[idx]
+        if not isinstance(row.get('audio'), np.ndarray):
+            return
+        self._busy = True
+        self._loading_label.text = '⏳ Rendering…'
+
+        def _worker():
+            try:
+                S_db, sr = self.ctrl.get_cached_spectrogram(
+                    row['wav_location'], row['audio'], row['sr']
+                )
+                zoom = self._zoom_slider.value
+                minor = self._read_minor_tick()
+                tiles, geometry = render_spectrogram_tiles(
+                    S_db, int(sr), self.ctrl.extractor.hop_length,
+                    zoom_factor=zoom, minor_tick_step=minor,
+                )
+                bouts = self.ctrl.current_bouts.get(idx, [])
+                sel = self._bout_list.selected_ids
+                Clock.schedule_once(
+                    partial(self._on_base_done, tiles, geometry, bouts, sel), 0
+                )
+            except Exception as exc:
+                Clock.schedule_once(
+                    partial(self._set_status, f'Render error: {exc}'), 0
+                )
+                Clock.schedule_once(lambda _: self._set_busy(False), 0)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_base_done(self, tiles, geometry, bouts, sel, dt):
+        self._spec_view.set_base_tiles(tiles, geometry)
+        self._spec_view.update_bouts(bouts, sel)
+        self._loading_label.text = ''
+        self._set_busy(False)
+
+    # ------------------------------------------------------------------
+    # Bout list selection
+    # ------------------------------------------------------------------
+
+    def _on_bout_selection_changed(self, selected_ids: list):
+        bouts = self.ctrl.current_bouts.get(self._current_idx, [])
+        if len(selected_ids) == 1:
+            bid = selected_ids[0]
+            if bid < len(bouts):
+                self._onset_input.text = f'{bouts[bid]["onset"]:.3f}'
+                self._offset_input.text = f'{bouts[bid]["offset"]:.3f}'
+        self._spec_view.update_bouts(bouts, selected_ids)
+
+    # ------------------------------------------------------------------
+    # Drag live-update (onset/offset boxes stay in sync during drag)
+    # ------------------------------------------------------------------
+
+    def _on_onset_live(self, t: float):
+        self._onset_input.text = f'{t:.3f}'
+
+    def _on_offset_live(self, t: float):
+        self._offset_input.text = f'{t:.3f}'
+
+    # ------------------------------------------------------------------
+    # Drag commit — Update Bout (from spectrogram drag)
+    # ------------------------------------------------------------------
+
+    def _on_drag_commit_update(self, bout_id: int, onset: float, offset: float):
+        result = self.ctrl.update_bout(self._current_idx, bout_id, onset, offset)
+        ok, msg = result[0], result[1]
+        new_id = result[2] if len(result) > 2 else bout_id
+        self._set_status(msg)
+        if ok:
+            self._refresh_bouts_after_mutation(sel=[new_id])
+        else:
+            bouts = self.ctrl.current_bouts.get(self._current_idx, [])
+            self._spec_view.update_bouts(bouts, self._bout_list.selected_ids)
+
+    def _on_drag_commit_add(self, onset: float, offset: float):
+        ok, msg = self.ctrl.add_bout(self._current_idx, onset, offset)
+        self._set_status(msg)
+        if ok:
+            self._refresh_bouts_after_mutation()
+
+    # ------------------------------------------------------------------
+    # Button handlers
+    # ------------------------------------------------------------------
+
+    def _on_update_bout(self, *_):
+        selected = self._bout_list.selected_ids
+        if len(selected) != 1:
+            self._set_status('Select exactly one bout to update.')
+            return
+        try:
+            onset = float(self._onset_input.text)
+            offset = float(self._offset_input.text)
+        except ValueError:
+            self._set_status('Invalid onset/offset values.')
+            return
+        result = self.ctrl.update_bout(self._current_idx, selected[0], onset, offset)
+        ok, msg = result[0], result[1]
+        new_id = result[2] if len(result) > 2 else selected[0]
+        self._set_status(msg)
+        if ok:
+            self._refresh_bouts_after_mutation(sel=[new_id])
+
+    def _on_add_bout(self, *_):
+        try:
+            onset = float(self._onset_input.text)
+            offset = float(self._offset_input.text)
+        except ValueError:
+            self._set_status('Invalid onset/offset values.')
+            return
+        ok, msg = self.ctrl.add_bout(self._current_idx, onset, offset)
+        self._set_status(msg)
+        if ok:
+            self._refresh_bouts_after_mutation()
+
+    def _on_remove_bouts(self, *_):
+        selected = self._bout_list.selected_ids
+        if not selected:
+            self._set_status('No bouts selected.')
+            return
+        ok, msg = self.ctrl.remove_bouts(self._current_idx, selected)
+        self._set_status(msg)
+        if ok:
+            self._refresh_bouts_after_mutation()
+
+    def _on_mark_not_outlier(self, *_):
+        selected = self._bout_list.selected_ids
+        if not selected:
+            self._set_status('No bouts selected.')
+            return
+        ok, msg = self.ctrl.set_not_outlier(self._current_idx, selected)
+        self._set_status(msg)
+        if ok:
+            self._refresh_bouts_after_mutation()
+
+    def _on_back(self, *_):
+        """Confirm, then hand off to the app to tear down and return to welcome."""
+        if not self._on_back_cb:
+            return
+
+        content = BoxLayout(orientation='vertical', spacing=14,
+                            padding=(20, 14))
+        content.add_widget(Label(
+            text='Return to the welcome screen?\nAny un-exported bout edits will be lost.',
+            halign='center', valign='middle',
+            font_size=sp(16), color=(0.85, 0.85, 0.88, 1),
+        ))
+        btn_row = BoxLayout(size_hint_y=None, height=44, spacing=12)
+        cancel_btn = Button(
+            text='Cancel',
+            background_color=(0.22, 0.22, 0.26, 1), background_normal='',
+        )
+        confirm_btn = Button(
+            text='Yes, new project',
+            background_color=(0.55, 0.18, 0.18, 1), background_normal='',
+        )
+        btn_row.add_widget(cancel_btn)
+        btn_row.add_widget(confirm_btn)
+        content.add_widget(btn_row)
+
+        popup = Popup(
+            title='New Project',
+            content=content,
+            size_hint=(None, None), size=(dp(400), dp(180)),
+            auto_dismiss=False,
+        )
+        cancel_btn.bind(on_release=popup.dismiss)
+
+        def _confirm(*_):
+            popup.dismiss()
+            self._on_back_cb()
+
+        confirm_btn.bind(on_release=_confirm)
+        popup.open()
+
+    def _on_finalize(self, *_):
+        if self._busy:
+            return
+        self._busy = True
+        self._loading_label.text = '⏳ Finalizing…'
+        idx = self._current_idx
+
+        def _worker():
+            ok, msg = self.ctrl.finalize(idx)
+            Clock.schedule_once(partial(self._on_finalize_done, msg), 0)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_finalize_done(self, msg, dt):
+        self._loading_label.text = ''
+        self._set_status(msg)
+        self._set_busy(False)
+        self._schedule_recompute()
+
+    def _on_export(self, *_):
+        if self._busy:
+            return
+        self._busy = True
+        self._loading_label.text = '⏳ Exporting…'
+        idx = self._current_idx
+
+        def _worker():
+            ok, msg = self.ctrl.export(idx, output_dir=self._bouts_audio_dir)
+            Clock.schedule_once(partial(self._on_export_done, msg), 0)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_export_done(self, msg, dt):
+        self._loading_label.text = ''
+        self._set_status(msg)
+        self._set_busy(False)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_bouts_after_mutation(self, sel: list | None = None):
+        """Sync bout list + spectrogram overlay after any in-memory mutation.
+
+        ``sel`` — explicit selection to restore (use when the caller knows the
+        correct post-sort index, e.g. after update_bout).  Falls back to the
+        current list selection when omitted.
+        """
+        bouts = self.ctrl.current_bouts.get(self._current_idx, [])
+        if sel is None:
+            sel = [i for i in self._bout_list.selected_ids if i < len(bouts)]
+        else:
+            sel = [i for i in sel if i < len(bouts)]
+        self._bout_list.set_bouts(bouts)
+        if sel:
+            self._bout_list.set_selection(sel)
+        self._spec_view.update_bouts(bouts, sel)
+
+    def _read_params(self) -> dict:
+        return {
+            'mfcc_threshold': self._mfcc_thresh.value,
+            'energy_threshold': self._energy_thresh.value,
+            'active_region_thresh': self._active_thresh.value,
+            'min_silence': self._min_silence.value,
+            'min_bout_len': self._min_bout_len.value,
+            'pad': self._pad.value,
+        }
+
+    def _set_param_widgets(self, params: dict):
+        self._mfcc_thresh.value = params.get('mfcc_threshold', 0.5)
+        self._energy_thresh.value = params.get('energy_threshold', 0.1)
+        self._active_thresh.value = params.get('active_region_thresh', 0.001)
+        self._min_silence.value = params.get('min_silence', 0.9)
+        self._min_bout_len.value = params.get('min_bout_len', 1.0)
+        self._pad.value = params.get('pad', 0.5)
+
+    def _read_minor_tick(self) -> float:
+        try:
+            return float(self._minor_tick_input.text)
+        except ValueError:
+            return 0.1
+
+    def _set_status(self, msg, dt=None):
+        self._status_label.text = str(msg)
+
+    def _set_busy(self, busy: bool):
+        self._busy = busy
+        if not busy:
+            self._loading_label.text = ''
+
+
+# ---------------------------------------------------------------------------
+# Helper factory functions (keeps _build_ui readable)
+# ---------------------------------------------------------------------------
+
+def _divider(parent, height: int = 2):
+    """A thin horizontal separator line between control rows."""
+    d = Widget(size_hint_y=None, height=height)
+    with d.canvas:
+        GColor(0.32, 0.32, 0.38, 1)
+        rect = GRect(pos=d.pos, size=d.size)
+    d.bind(pos=lambda *a: setattr(rect, 'pos', d.pos),
+           size=lambda *a: setattr(rect, 'size', d.size))
+    parent.add_widget(d)
+    return d
+
+
+def _lbl(parent, text: str, font_size: int = 16, width: int = 140) -> Label:
+    # size_hint_y=1 → fill the row height so valign='middle' truly centres the
+    # text against the inputs/buttons beside it (BoxLayout ignores pos_hint).
+    lbl = Label(
+        text=text,
+        size_hint_x=None, width=dp(width),
+        size_hint_y=1,
+        font_size=sp(font_size),
+        color=(0.8, 0.8, 0.8, 1),
+        halign='right', valign='middle',
+    )
+    lbl.bind(size=lbl.setter('text_size'))
+    parent.add_widget(lbl)
+    return lbl
+
+
+def _param_input(parent, label: str, default: float) -> ParamInput:
+    pi = ParamInput(default=default, label=label, size_hint_x=1)
+    parent.add_widget(pi)
+    return pi
+
+
+def _float_input(parent, default_text: str = '0.0', font_size: int = 15,
+                 width: int = 110, height: int = 44) -> TextInput:
+    # Fill the row vertically and centre the single line of text so the box
+    # lines up with its label (a single-line TextInput top-aligns by default).
+    ti = TextInput(
+        text=default_text,
+        multiline=False,
+        input_filter='float',
+        size_hint_x=None, width=dp(width),
+        size_hint_y=1,
+        font_size=sp(font_size),
+        background_color=(0.12, 0.12, 0.12, 1),
+        foreground_color=(1, 1, 1, 1),
+        cursor_color=(1, 1, 1, 1),
+    )
+
+    def _center(inst, *_a):
+        inst.padding = [8, max((inst.height - inst.line_height) / 2.0, 0), 8, 0]
+
+    ti.bind(height=_center, line_height=_center)
+    Clock.schedule_once(lambda _dt: _center(ti), 0)
+    parent.add_widget(ti)
+    return ti
+
+
+def _btn(parent, text: str, bg=(0.2, 0.2, 0.2, 1), font_size: int = 19,
+         width: int = 190, height: int = 48) -> Button:
+    b = Button(
+        text=text,
+        size_hint_x=None, width=dp(width),
+        size_hint_y=None, height=height,
+        font_size=sp(font_size),
+        background_color=bg,
+        background_normal='',
+    )
+    parent.add_widget(b)
+    return b
