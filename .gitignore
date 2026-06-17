@@ -16,8 +16,9 @@ bouts_audio/
 # Jupyter artifacts
 .ipynb_checkpoints/
 
-#Claude
-Claude.md
+# Claude / local-only project files (not published to the repo)
+CLAUDE.md
+RELEASE_NOTES.md
 
 # Local-only docs (not published to the repo)
 docs/RELEASING.md
