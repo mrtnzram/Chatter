@@ -18,7 +18,7 @@ Grab the latest build for your platform from the
 | Platform | File | What to do |
 | --- | --- | --- |
 | Windows | `Chatter.exe` | Download and double-click to run. |
-| macOS | `Chatter-macos.zip` | Unzip, then open `Chatter.app` (see note below). |
+| macOS | `Chatter.dmg` | Open it and drag **Chatter** into Applications (see note below). |
 
 ### Windows
 
@@ -29,11 +29,12 @@ single-file exe unpacks itself to a temporary folder each time it starts).
 
 ### macOS
 
-Unzip the download and move `Chatter.app` to your Applications folder. The app is
-**unsigned / not notarized**, so the first launch needs one extra step to get past
-Gatekeeper:
+Double-click `Chatter.dmg` to open it, then drag **Chatter** onto the
+**Applications** shortcut shown in the window. Open Chatter from your Applications
+folder. The app is **unsigned / not notarized**, so the first launch needs one
+extra step to get past Gatekeeper:
 
-1. **Right-click (or Control-click) `Chatter.app` → Open**, then click **Open** in
+1. **Right-click (or Control-click) `Chatter` → Open**, then click **Open** in
    the dialog that appears.
 2. If macOS still blocks it, go to **System Settings → Privacy & Security**, scroll
    to the Security section, and click **Open Anyway** next to the Chatter message,

@@ -69,10 +69,20 @@ jobs:
           KIVY_GL_BACKEND: mock
         run: pyinstaller Chatter.spec --noconfirm
 
-      - name: Package macOS app (zip via ditto)
+      - name: Package macOS app as a .dmg
         if: runner.os == 'macOS'
         working-directory: chatter_app
-        run: ditto -c -k --keepParent dist/Chatter.app dist/Chatter-macos.zip
+        # Stage the .app next to an /Applications shortcut, then build a
+        # compressed .dmg with the built-in hdiutil (no extra dependencies).
+        # Users open the .dmg and drag Chatter into Applications — a single
+        # download, no unzipping.
+        run: |
+          set -e
+          mkdir -p dmg_stage
+          ditto dist/Chatter.app "dmg_stage/Chatter.app"
+          ln -s /Applications dmg_stage/Applications
+          hdiutil create -volname "Chatter" -srcfolder dmg_stage \
+            -ov -format UDZO dist/Chatter.dmg
 
       - name: Upload Windows artifact
         if: runner.os == 'Windows'
@@ -87,7 +97,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Chatter-macos
-          path: chatter_app/dist/Chatter-macos.zip
+          path: chatter_app/dist/Chatter.dmg
           if-no-files-found: error
 
   release:
