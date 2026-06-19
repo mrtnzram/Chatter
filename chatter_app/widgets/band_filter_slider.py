@@ -55,12 +55,14 @@ class BandFilterSlider(Widget):
     @property
     def highpass_value(self) -> Optional[float]:
         """High-pass cutoff in Hz, or None when parked at 0 (disabled)."""
-        return None if self._hp <= 0 else round(self._hp, 1)
+        v = round(self._hp, 1)
+        return None if v <= 0 else v
 
     @property
     def lowpass_value(self) -> Optional[float]:
         """Low-pass cutoff in Hz, or None when parked at Nyquist (disabled)."""
-        return None if self._lp >= self._nyquist else round(self._lp, 1)
+        v = round(self._lp, 1)
+        return None if v >= self._nyquist else v
 
     def set_sr(self, sr: int):
         """Rescale the frequency axis for a new recording's sample rate.
@@ -124,7 +126,7 @@ class BandFilterSlider(Widget):
         d_lp = abs(touch.y - lp_y)
         if min(d_hp, d_lp) > _GRAB_PX:
             return False
-        # Grab the nearer handle; on a tie favour moving toward the touch.
+        # Grab the nearer handle; on a tie prefer the high-pass handle.
         self._drag = 'hp' if d_hp <= d_lp else 'lp'
         touch.grab(self)
         self._apply_drag(touch.y)

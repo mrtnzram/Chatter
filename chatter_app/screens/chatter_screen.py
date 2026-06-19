@@ -660,6 +660,10 @@ class ChatterScreen(Screen):
         )
 
     def _apply_filter_change(self):
+        if self._busy:
+            # Don't drop the change — retry after the current worker finishes.
+            Clock.schedule_once(lambda _dt: self._apply_filter_change(), 0.2)
+            return
         self.ctrl.invalidate_audio(self._current_idx)
         self._schedule_recompute(force=True)
 
