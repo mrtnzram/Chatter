@@ -7,7 +7,7 @@ Usage
 
 The app opens a welcome screen where the user selects:
   - Recording directory (contains .wav files)
-  - CSV export directory (bouts.csv + chatter.duckdb are written here)
+  - CSV export directory (<recording-dir-name>.csv + .duckdb are written here)
   - Bouts audio directory (exported audio clips go here)
 
 BirdNET
@@ -115,8 +115,14 @@ class ChatterApp(App):
                     return
 
                 os.makedirs(csv_dir, exist_ok=True)
-                duckdb_path = os.path.join(csv_dir, 'chatter.duckdb')
-                csv_path    = os.path.join(csv_dir, 'bouts.csv')
+                # Name the persisted store after the recording directory so each
+                # recording set keeps its own bouts file (e.g. "MyBirds.csv" /
+                # "MyBirds.duckdb").  Keeping them per-recording is what lets the
+                # store reload and prepopulate *this* directory's already-exported
+                # bouts on reopen instead of bleeding in another project's data.
+                rec_name = os.path.basename(os.path.normpath(songs_dir)) or 'bouts'
+                duckdb_path = os.path.join(csv_dir, f'{rec_name}.duckdb')
+                csv_path    = os.path.join(csv_dir, f'{rec_name}.csv')
 
                 ctrl = ChatterController(
                     df, extractor,
