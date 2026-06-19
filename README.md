@@ -5,12 +5,16 @@ Semi-automatic bout segmentation from bird song recordings using acoustic featur
 Chatter is a desktop application (built with Kivy). The recommended way to use it
 is to download a pre-packaged build.
 
+<p align="center">
+  <img src="chatter_app/assets/2026-06-17_16-25-52.png" width="45%" />
+  <img src="chatter_app/assets/2026-06-17_16-26-49.png" width="45%" />
+</p>
+
+
 > The original Jupyter notebook workflow (`Chatter.ipynb`) has been **retired**
 > and superseded by the desktop app described below. If you still want the
 > notebook version, it remains available as the
 > [**v0.3.0 release**](https://github.com/mrtnzram/Chatter/releases/tag/v0.3.0).
-
-![welcome_screen](https://github.com/mrtnzram/Chatter/blob/master/chatter_app/assets/2026-06-17_16-25-52.png) ![chatter_screen](https://github.com/mrtnzram/Chatter/blob/master/chatter_app/assets/2026-06-17_16-26-49.png)
 
 ## Download (recommended)
 
