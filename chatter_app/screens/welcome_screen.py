@@ -2,7 +2,7 @@
 
 The user picks three directories before entering the main app:
   1. Recording directory  (where .wav files live)
-  2. CSV export directory (where bouts.csv + chatter.duckdb are written)
+  2. CSV export directory (where <recording-dir-name>.csv + .duckdb are written)
   3. Bouts audio directory (where exported audio clips are saved)
 
 Changing the recording directory auto-fills the other two as sensible

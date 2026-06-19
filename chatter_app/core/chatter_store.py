@@ -176,8 +176,8 @@ class ChatterStore:
         self.get_bouts_df().to_csv(path, index=False)
 
     def _migrate_csv_if_needed(self) -> None:
-        """If the bouts table is empty and a legacy bouts.csv exists, import it
-        once so users resuming from CSV lose nothing."""
+        """If the bouts table is empty and the recording's ``<recname>.csv``
+        exists, import it once so users resuming from CSV lose nothing."""
         count = self._bouts_con.execute("SELECT COUNT(*) FROM bouts").fetchone()[0]
         if count > 0 or not self.csv_path or not os.path.exists(self.csv_path):
             return

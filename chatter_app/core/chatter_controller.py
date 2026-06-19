@@ -158,11 +158,31 @@ class ChatterController:
 
         if saved:
             bouts = sorted(saved, key=lambda b: b['onset'])
+            # Pad isn't a detection parameter, so a pad change comes through
+            # with force=False and never re-runs detection. Re-derive each
+            # bout's export clip boundaries (wavstart/wavend) from the current
+            # pad here so pad edits take effect on saved/existing bouts — these
+            # are always onset/offset ± pad, matching add_bout/update_bout.
+            audio_len = (
+                len(row['audio']) / row['sr']
+                if isinstance(row.get('audio'), np.ndarray) and row.get('sr')
+                else float('inf')
+            )
+            pad = params.get('pad', _DEFAULT_PARAMS['pad'])
+            for b in bouts:
+                b['wavstart'] = round(max(b['onset'] - pad, 0.0), 3)
+                b['wavend'] = round(min(b['offset'] + pad, audio_len), 3)
             self.current_bouts[idx] = bouts
             self.df.at[idx, 'bouts'] = bouts
             return bouts, {}
 
-        # No saved bouts — run full feature detection.
+        # No saved bouts — run full feature detection with the current params.
+        # Re-running here on every forced recompute is what auto-finalizes the
+        # parameters (the old explicit "Finalize Parameters" step). We persist
+        # only the bouts list: the other feature arrays (mfcc, spectral_flux,
+        # …) are not consumed anywhere in the app, and assigning a 2-D/1-D numpy
+        # array into a single df cell raises a ValueError that previously
+        # surfaced as a spurious "could not load recording" error.
         features = self.extractor.compute_all_features(row)
         bouts = sorted(features['bouts'], key=lambda b: b['onset'])
         self.current_bouts[idx] = bouts
@@ -273,22 +293,8 @@ class ChatterController:
         return False, 'No bouts selected.'
 
     # ------------------------------------------------------------------
-    # Finalize + Export (run on a background thread)
+    # Export (run on a background thread)
     # ------------------------------------------------------------------
-
-    def finalize(self, idx: int):
-        """Apply saved params, recompute, store feature columns.
-
-        Returns (ok, message).
-        """
-        params = self.bird_params.get(idx, _DEFAULT_PARAMS)
-        self._apply_params(params)
-        row = self.df.iloc[idx].copy()
-        features = self.extractor.compute_all_features(row)
-        for key, value in features.items():
-            self.df.at[idx, key] = value
-        label = f"{self.df.loc[idx, 'species']} {self.df.loc[idx, 'bird_id']}"
-        return True, f'Finalized parameters for {label}.'
 
     def export(self, idx: int, output_dir: str = 'bouts_audio'):
         """Write bout audio clips, upsert to DuckDB, regenerate CSV.

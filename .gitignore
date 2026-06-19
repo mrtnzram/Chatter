@@ -10,7 +10,9 @@ __pycache__/
 # User data produced at runtime — not source files
 chatter.duckdb
 chatter.duckdb.wal
+Songs.duckdb
 bouts.csv
+Songs.csv
 bouts_audio/
 
 # Jupyter artifacts
@@ -19,12 +21,9 @@ bouts_audio/
 # Claude / local-only project files (not published to the repo)
 CLAUDE.md
 RELEASE_NOTES*
-docs/RELEASE_NOTES*
 
 # Local-only docs (not published to the repo)
-docs/RELEASING.md
-docs/SETUP.md
-docs/MANUAL.md
+docs/
 
 # PyInstaller build artifacts (generated locally or in CI)
 build/

@@ -6,19 +6,24 @@ Layout (top to bottom)
 2. Param row A            (MFCC Thresh | Energy Thresh | Active Region Thresh)
 3. Param row B            (Min Silence | Min Bout Len | Pad)
 4. Bout-select row        (BoutList | Remove Bouts | Mark as Not Outlier)
-5. Bout-edit row          (Onset | Offset | Update Bout | Add Bout)
-6. Action row             (Finalize Parameters | Export Bouts)
-7. Status bar             (one Label for last action feedback)
-8. Zoom row               (Zoom Slider | Minor-tick TextInput)
+5. Bout-edit row          (Onset | Offset | Update Bout | Add Bout · Refresh | Export Bouts)
+6. Status bar             (one fixed-height Label for last action feedback)
+7. Zoom row               (Zoom Slider | Minor-tick TextInput)
 -- divider --
 9. Audio player row       (play/pause + position)
 10. Scrollable spectrogram (SpectrogramView inside horizontal ScrollView)
 
 Threading model
 ---------------
-Slow operations (recompute, finalize, export) run on a ``threading.Thread``.
+Slow operations (recompute, export) run on a ``threading.Thread``.
 Results are marshalled back to the main thread via ``Clock.schedule_once``.
 Drag interactions on the spectrogram are synchronous (no feature recompute).
+
+Because Python threads cannot be force-killed, a stuck/hung worker is handled
+by *abandoning* it: every background render captures ``self._recompute_gen``
+and its result callback drops itself if the token has since advanced. The
+**Refresh** button bumps that token, clears the ``_busy`` guard, and starts a
+fresh load — recovering the UI from a frozen "Loading…/Computing…" state.
 """
 
 from __future__ import annotations
@@ -122,6 +127,11 @@ class ChatterScreen(Screen):
         self._busy = False       # True while a background thread is running
         self._current_idx: int = 0
         self._zoom_debounce: Optional[object] = None
+        self._status_clear_event: Optional[object] = None
+        # Monotonic token identifying the latest background render. A worker's
+        # result callback ignores itself if this has advanced since it started
+        # (used to abandon a hung/superseded computation — see Refresh).
+        self._recompute_gen: int = 0
 
         self._build_ui()
         self._connect_callbacks()
@@ -207,17 +217,19 @@ class ChatterScreen(Screen):
         self._bout_list = BoutList(size_hint_x=1, size_hint_y=1)
         row4.add_widget(self._bout_list)
         btn_col = BoxLayout(orientation='vertical', size_hint_x=None,
-                            width=dp(230), spacing=12)
+                            width=dp(200), spacing=12)
         self._remove_btn = _btn(btn_col, 'Remove Bouts',
                                 bg=(0.65, 0.15, 0.15, 1), height=52,
-                                width=220, font_size=15)
+                                width=200, font_size=15)
         self._not_outlier_btn = _btn(btn_col, 'Mark Not Outlier',
                                      bg=(0.15, 0.35, 0.65, 1), height=52,
-                                     width=220, font_size=15)
+                                     width=200, font_size=15)
         row4.add_widget(btn_col)
         ctrl_panel.add_widget(row4)
 
-        # Row 5: Onset / Offset / Update / Add (emphasised — larger fonts)
+        # Row 5: Onset / Offset / Update / Add (left) · Refresh / Export (right).
+        # A flexible spacer pushes Refresh + Export to the right edge so they
+        # sit on the same baseline as the onset/offset inputs.
         row5 = BoxLayout(size_hint_y=None, height=56, spacing=12)
         _lbl(row5, 'Onset:')
         self._onset_input = _float_input(row5, '0.000', font_size=20, width=130)
@@ -229,32 +241,25 @@ class ChatterScreen(Screen):
         self._add_btn = _btn(row5, 'Add Bout',
                              bg=(0.1, 0.5, 0.1, 1),
                              font_size=22, height=56, width=210)
+        row5.add_widget(Widget(size_hint_x=1))   # flexible spacer
+        self._refresh_btn = _btn(row5, 'Refresh',
+                                 bg=(0.0, 0.55, 0.55, 1), height=56,
+                                 width=200, font_size=16)
+        self._export_btn = _btn(row5, 'Export Bouts',
+                                bg=(0.0, 0.35, 0.6, 1), height=56,
+                                width=200, font_size=16)
         ctrl_panel.add_widget(row5)
 
-        # Row 6: spacer · Finalize + Export (right)
-        row6 = BoxLayout(size_hint_y=None, height=58, spacing=16,
-                         padding=(10, 0))
-        row6.add_widget(Widget(size_hint_x=1))   # flexible spacer
-        self._finalize_btn = _btn(row6, 'Finalize Parameters',
-                                  bg=(0.1, 0.5, 0.1, 1), height=52,
-                                  width=240, font_size=16)
-        self._export_btn = _btn(row6, 'Export Bouts',
-                                bg=(0.0, 0.35, 0.6, 1), height=52,
-                                width=200, font_size=16)
-        ctrl_panel.add_widget(row6)
-
-        # Status bar — same width-only text_size pattern so font_size works.
+        # Status bar — fixed height (reserves room for up to two lines) so the
+        # spectrogram below never shifts as messages appear/clear/wrap.
         self._status_label = Label(
             text='Ready.',
-            size_hint_y=None,
+            size_hint_y=None, height=dp(52),
             font_size=sp(20), color=(0.7, 0.9, 0.7, 1),
             halign='left', valign='top',
         )
         self._status_label.bind(
             width=lambda inst, w: setattr(inst, 'text_size', (w, None))
-        )
-        self._status_label.bind(
-            texture_size=lambda inst, ts: setattr(inst, 'height', ts[1] + 8)
         )
         ctrl_panel.add_widget(self._status_label)
 
@@ -324,7 +329,9 @@ class ChatterScreen(Screen):
         # Bird selection
         self._bird_spinner.bind(text=self._on_bird_selected)
 
-        # Param commits → force re-detection with new params
+        # Param commits → force re-detection with new params. A forced
+        # recompute re-runs detection and updates the in-memory bouts list, so
+        # parameters are effectively finalized on every change (Finalize removed).
         for pi in (self._mfcc_thresh, self._energy_thresh, self._active_thresh,
                    self._min_silence, self._min_bout_len):
             pi.on_commit = lambda _: self._schedule_recompute(force=True)
@@ -353,7 +360,7 @@ class ChatterScreen(Screen):
 
         # Action buttons
         self._back_btn.bind(on_release=self._on_back)
-        self._finalize_btn.bind(on_release=self._on_finalize)
+        self._refresh_btn.bind(on_release=self._on_refresh)
         self._export_btn.bind(on_release=self._on_export)
 
         # Spectrogram interactive callbacks
@@ -492,6 +499,8 @@ class ChatterScreen(Screen):
         if self._busy:
             return
         self._busy = True
+        self._recompute_gen += 1
+        gen = self._recompute_gen
         self._loading_label.text = 'Computing...'
         self._set_status('Running feature detection...')
         params = self._read_params()
@@ -514,23 +523,27 @@ class ChatterScreen(Screen):
                     zoom_factor=zoom, minor_tick_step=minor,
                 )
                 Clock.schedule_once(
-                    partial(self._on_recompute_done, idx, bouts, tiles, geometry,
-                            row['wav_location']),
+                    partial(self._on_recompute_done, gen, idx, bouts, tiles,
+                            geometry, row['wav_location']),
                     0,
                 )
             except Exception as exc:
                 Clock.schedule_once(
-                    partial(self._set_status,
-                            f'Could not load recording: {exc}. '
-                            'Check that the file exists and is a valid WAV.'), 0
+                    partial(self._on_recompute_error, gen, str(exc)), 0
                 )
-                Clock.schedule_once(lambda _: self._set_busy(False), 0)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_recompute_done(self, idx, bouts, tiles, geometry, wav_path, dt):
+    def _on_recompute_done(self, gen, idx, bouts, tiles, geometry, wav_path, dt):
+        if gen != self._recompute_gen:
+            # A newer load (Refresh, param change, or bird switch) superseded
+            # this one. Drop the stale result; the newer worker owns _busy.
+            return
         if idx != self._current_idx:
+            # User switched birds mid-load. Release the guard and load the bird
+            # they actually want now.
             self._set_busy(False)
+            self._schedule_recompute()
             return
         self._spec_view.set_base_tiles(tiles, geometry)
         self._spec_view.update_bouts(bouts, [])
@@ -538,6 +551,39 @@ class ChatterScreen(Screen):
         self._loading_label.text = ''
         self._set_status(f'Loaded {len(bouts)} bout(s).')
         self._set_busy(False)
+
+    def _on_recompute_error(self, gen, msg, dt):
+        if gen != self._recompute_gen:
+            return
+        self._set_status(
+            'Could not load recording. Check that the WAV file exists, '
+            'or try adjusting the zoom.'
+        )
+        self._set_busy(False)
+
+    # ------------------------------------------------------------------
+    # Refresh — safety hatch for a frozen / stuck load
+    # ------------------------------------------------------------------
+
+    def _on_refresh(self, *_):
+        """Force a spectrogram reload, recovering from a stuck 'busy' state.
+
+        Python threads can't be force-killed, so any in-flight worker is
+        *abandoned* rather than stopped: bumping ``_recompute_gen`` makes its
+        eventual result a no-op, and clearing ``_busy`` lets a fresh load
+        start immediately. If the previous computation had actually finished
+        (the common "computed but never displayed" freeze), the spectrogram is
+        cached and this returns near-instantly.
+        """
+        # Don't let Refresh bypass an in-flight export (it also uses the store on a worker thread).
+        if self._busy and self._loading_label.text.startswith('Exporting'):
+            self._set_status('Export in progress — please wait.')
+            return
+
+        self._recompute_gen += 1   # invalidate any in-flight worker's result
+        self._set_busy(False)
+        self._set_status('Refreshing spectrogram...')
+        self._schedule_recompute(force=False)
 
     # ------------------------------------------------------------------
     # Base re-render (zoom/minor-tick change — no feature recompute)
@@ -561,6 +607,8 @@ class ChatterScreen(Screen):
         if not isinstance(row.get('audio'), np.ndarray):
             return
         self._busy = True
+        self._recompute_gen += 1
+        gen = self._recompute_gen
         self._loading_label.text = 'Rendering...'
 
         chunk_start = float(row.get('chunk_start') or 0.0)
@@ -580,22 +628,29 @@ class ChatterScreen(Screen):
                 bouts = self.ctrl.current_bouts.get(idx, [])
                 sel = self._bout_list.selected_ids
                 Clock.schedule_once(
-                    partial(self._on_base_done, tiles, geometry, bouts, sel), 0
+                    partial(self._on_base_done, gen, tiles, geometry, bouts, sel), 0
                 )
             except Exception:
-                Clock.schedule_once(
-                    partial(self._set_status,
-                            'Could not render spectrogram. '
-                            'Try zooming out or increasing the minor tick step.'), 0
-                )
-                Clock.schedule_once(lambda _: self._set_busy(False), 0)
+                Clock.schedule_once(partial(self._on_base_error, gen), 0)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_base_done(self, tiles, geometry, bouts, sel, dt):
+    def _on_base_done(self, gen, tiles, geometry, bouts, sel, dt):
+        if gen != self._recompute_gen:
+            return
         self._spec_view.set_base_tiles(tiles, geometry)
         self._spec_view.update_bouts(bouts, sel)
         self._loading_label.text = ''
+        self._set_status('')   # dismiss any lingering render-error message
+        self._set_busy(False)
+
+    def _on_base_error(self, gen, dt):
+        if gen != self._recompute_gen:
+            return
+        self._set_status(
+            'Could not render spectrogram. '
+            'Try zooming out or increasing the minor tick step.'
+        )
         self._set_busy(False)
 
     # ------------------------------------------------------------------
@@ -740,25 +795,6 @@ class ChatterScreen(Screen):
         confirm_btn.bind(on_release=_confirm)
         popup.open()
 
-    def _on_finalize(self, *_):
-        if self._busy:
-            return
-        self._busy = True
-        self._loading_label.text = 'Finalizing...'
-        idx = self._current_idx
-
-        def _worker():
-            ok, msg = self.ctrl.finalize(idx)
-            Clock.schedule_once(partial(self._on_finalize_done, msg), 0)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _on_finalize_done(self, msg, dt):
-        self._loading_label.text = ''
-        self._set_status(msg)
-        self._set_busy(False)
-        self._schedule_recompute()
-
     def _on_export(self, *_):
         if self._busy:
             return
@@ -829,8 +865,18 @@ class ChatterScreen(Screen):
         except ValueError:
             return 0.1
 
+    _STATUS_CLEAR_DELAY = 5.0  # seconds before a status message auto-clears
+
     def _set_status(self, msg, dt=None):
         self._status_label.text = str(msg)
+        if self._status_clear_event:
+            self._status_clear_event.cancel()
+            self._status_clear_event = None
+        if msg:
+            self._status_clear_event = Clock.schedule_once(
+                lambda *_: setattr(self._status_label, 'text', ''),
+                self._STATUS_CLEAR_DELAY,
+            )
 
     def _set_busy(self, busy: bool):
         self._busy = busy
