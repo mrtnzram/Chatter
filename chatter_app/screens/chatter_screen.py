@@ -330,8 +330,8 @@ class ChatterScreen(Screen):
         self._bird_spinner.bind(text=self._on_bird_selected)
 
         # Param commits → force re-detection with new params. A forced
-        # recompute also persists the feature columns, so parameters are
-        # auto-finalized on every change (the old "Finalize" button is gone).
+        # recompute re-runs detection and updates the in-memory bouts list, so
+        # parameters are effectively finalized on every change (Finalize removed).
         for pi in (self._mfcc_thresh, self._energy_thresh, self._active_thresh,
                    self._min_silence, self._min_bout_len):
             pi.on_commit = lambda _: self._schedule_recompute(force=True)
