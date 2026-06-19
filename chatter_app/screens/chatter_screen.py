@@ -575,9 +575,13 @@ class ChatterScreen(Screen):
         (the common "computed but never displayed" freeze), the spectrogram is
         cached and this returns near-instantly.
         """
+        # Don't let Refresh bypass an in-flight export (it also uses the store on a worker thread).
+        if self._busy and self._loading_label.text.startswith('Exporting'):
+            self._set_status('Export in progress — please wait.')
+            return
+
         self._recompute_gen += 1   # invalidate any in-flight worker's result
-        self._busy = False
-        self._loading_label.text = ''
+        self._set_busy(False)
         self._set_status('Refreshing spectrogram...')
         self._schedule_recompute(force=False)
 
