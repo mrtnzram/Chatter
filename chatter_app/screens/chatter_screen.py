@@ -6,10 +6,9 @@ Layout (top to bottom)
 2. Param row A            (MFCC Thresh | Energy Thresh | Active Region Thresh)
 3. Param row B            (Min Silence | Min Bout Len | Pad)
 4. Bout-select row        (BoutList | Remove Bouts | Mark as Not Outlier)
-5. Bout-edit row          (Onset | Offset | Update Bout | Add Bout)
-6. Action row             (Refresh | Export Bouts)
-7. Status bar             (one Label for last action feedback)
-8. Zoom row               (Zoom Slider | Minor-tick TextInput)
+5. Bout-edit row          (Onset | Offset | Update Bout | Add Bout · Refresh | Export Bouts)
+6. Status bar             (one fixed-height Label for last action feedback)
+7. Zoom row               (Zoom Slider | Minor-tick TextInput)
 -- divider --
 9. Audio player row       (play/pause + position)
 10. Scrollable spectrogram (SpectrogramView inside horizontal ScrollView)
@@ -218,17 +217,19 @@ class ChatterScreen(Screen):
         self._bout_list = BoutList(size_hint_x=1, size_hint_y=1)
         row4.add_widget(self._bout_list)
         btn_col = BoxLayout(orientation='vertical', size_hint_x=None,
-                            width=dp(230), spacing=12)
+                            width=dp(200), spacing=12)
         self._remove_btn = _btn(btn_col, 'Remove Bouts',
                                 bg=(0.65, 0.15, 0.15, 1), height=52,
-                                width=220, font_size=15)
+                                width=200, font_size=15)
         self._not_outlier_btn = _btn(btn_col, 'Mark Not Outlier',
                                      bg=(0.15, 0.35, 0.65, 1), height=52,
-                                     width=220, font_size=15)
+                                     width=200, font_size=15)
         row4.add_widget(btn_col)
         ctrl_panel.add_widget(row4)
 
-        # Row 5: Onset / Offset / Update / Add (emphasised — larger fonts)
+        # Row 5: Onset / Offset / Update / Add (left) · Refresh / Export (right).
+        # A flexible spacer pushes Refresh + Export to the right edge so they
+        # sit on the same baseline as the onset/offset inputs.
         row5 = BoxLayout(size_hint_y=None, height=56, spacing=12)
         _lbl(row5, 'Onset:')
         self._onset_input = _float_input(row5, '0.000', font_size=20, width=130)
@@ -240,32 +241,25 @@ class ChatterScreen(Screen):
         self._add_btn = _btn(row5, 'Add Bout',
                              bg=(0.1, 0.5, 0.1, 1),
                              font_size=22, height=56, width=210)
+        row5.add_widget(Widget(size_hint_x=1))   # flexible spacer
+        self._refresh_btn = _btn(row5, 'Refresh',
+                                 bg=(0.0, 0.55, 0.55, 1), height=56,
+                                 width=200, font_size=16)
+        self._export_btn = _btn(row5, 'Export Bouts',
+                                bg=(0.0, 0.35, 0.6, 1), height=56,
+                                width=200, font_size=16)
         ctrl_panel.add_widget(row5)
 
-        # Row 6: spacer · Refresh + Export (right)
-        row6 = BoxLayout(size_hint_y=None, height=58, spacing=16,
-                         padding=(10, 0))
-        row6.add_widget(Widget(size_hint_x=1))   # flexible spacer
-        self._refresh_btn = _btn(row6, 'Refresh',
-                                 bg=(0.0, 0.55, 0.55, 1), height=52,
-                                 width=240, font_size=16)
-        self._export_btn = _btn(row6, 'Export Bouts',
-                                bg=(0.0, 0.35, 0.6, 1), height=52,
-                                width=200, font_size=16)
-        ctrl_panel.add_widget(row6)
-
-        # Status bar — same width-only text_size pattern so font_size works.
+        # Status bar — fixed height (reserves room for up to two lines) so the
+        # spectrogram below never shifts as messages appear/clear/wrap.
         self._status_label = Label(
             text='Ready.',
-            size_hint_y=None,
+            size_hint_y=None, height=dp(52),
             font_size=sp(20), color=(0.7, 0.9, 0.7, 1),
             halign='left', valign='top',
         )
         self._status_label.bind(
             width=lambda inst, w: setattr(inst, 'text_size', (w, None))
-        )
-        self._status_label.bind(
-            texture_size=lambda inst, ts: setattr(inst, 'height', ts[1] + 8)
         )
         ctrl_panel.add_widget(self._status_label)
 
@@ -562,8 +556,8 @@ class ChatterScreen(Screen):
         if gen != self._recompute_gen:
             return
         self._set_status(
-            f'Could not load recording: {msg}. '
-            'Check that the file exists and is a valid WAV.'
+            'Could not load recording. Check that the WAV file exists, '
+            'or try adjusting the zoom.'
         )
         self._set_busy(False)
 
