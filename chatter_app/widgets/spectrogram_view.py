@@ -82,6 +82,8 @@ def render_spectrogram_tiles(
     hop_length: int,
     zoom_factor: float = 1.0,
     minor_tick_step: float = 0.1,
+    brightness: float = 0.0,
+    contrast: float = 1.0,
 ) -> Tuple[List[Tuple[np.ndarray, int, int]], SpectrogramGeometry]:
     """Render the spectrogram as a list of RGBA tile arrays.
 
@@ -126,6 +128,10 @@ def render_spectrogram_tiles(
         S_norm = (S_db - s_min) / (s_max - s_min)
     else:
         S_norm = np.zeros_like(S_db)
+    # Display-only brightness/contrast tint: pivot contrast about mid-grey,
+    # then shift by brightness. Pure pixel remap — S_db (and its cache) untouched.
+    if contrast != 1.0 or brightness != 0.0:
+        S_norm = np.clip((S_norm - 0.5) * contrast + 0.5 + brightness, 0.0, 1.0)
     # Flip vertically: low frequencies at bottom
     S_norm_flip = S_norm[::-1, :]
 
