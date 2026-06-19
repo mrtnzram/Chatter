@@ -430,6 +430,22 @@ class ChatterScreen(Screen):
         self._scroll.scroll_x = float(max(0.0, min(1.0, target)))
 
     # ------------------------------------------------------------------
+    # Screen lifecycle
+    # ------------------------------------------------------------------
+
+    def on_enter(self, *_):
+        """Called by Kivy when the screen transition into this screen completes.
+
+        The FadeTransition runs for 0.25 s.  If the background recompute
+        finishes during that window, set_base_tiles() draws into a canvas
+        that Kivy may not re-composite after the transition ends.  Forcing
+        a full redraw here guarantees the spectrogram is visible as soon as
+        the screen settles.
+        """
+        if self._spec_view._textures:
+            self._spec_view._full_redraw()
+
+    # ------------------------------------------------------------------
     # Bird selection
     # ------------------------------------------------------------------
 

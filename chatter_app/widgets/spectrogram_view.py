@@ -330,7 +330,7 @@ class SpectrogramView(Widget):
         g = self._geometry
         if g is None:
             return
-        h = self.height
+        h = self.height or _SPEC_HEIGHT_PX
 
         with self.canvas.after:
             selected_set = set(self._selected_ids)
