@@ -162,8 +162,12 @@ class ChatterController:
             self.df.at[idx, 'bouts'] = bouts
             return bouts, {}
 
-        # No saved bouts — run full feature detection.
+        # No saved bouts — run full feature detection. Persist every feature
+        # column back into df so parameters are auto-finalized on each run
+        # (this replaces the old explicit "Finalize Parameters" step).
         features = self.extractor.compute_all_features(row)
+        for key, value in features.items():
+            self.df.at[idx, key] = value
         bouts = sorted(features['bouts'], key=lambda b: b['onset'])
         self.current_bouts[idx] = bouts
         self.df.at[idx, 'bouts'] = bouts
@@ -273,22 +277,8 @@ class ChatterController:
         return False, 'No bouts selected.'
 
     # ------------------------------------------------------------------
-    # Finalize + Export (run on a background thread)
+    # Export (run on a background thread)
     # ------------------------------------------------------------------
-
-    def finalize(self, idx: int):
-        """Apply saved params, recompute, store feature columns.
-
-        Returns (ok, message).
-        """
-        params = self.bird_params.get(idx, _DEFAULT_PARAMS)
-        self._apply_params(params)
-        row = self.df.iloc[idx].copy()
-        features = self.extractor.compute_all_features(row)
-        for key, value in features.items():
-            self.df.at[idx, key] = value
-        label = f"{self.df.loc[idx, 'species']} {self.df.loc[idx, 'bird_id']}"
-        return True, f'Finalized parameters for {label}.'
 
     def export(self, idx: int, output_dir: str = 'bouts_audio'):
         """Write bout audio clips, upsert to DuckDB, regenerate CSV.
