@@ -10,7 +10,7 @@ is to download a pre-packaged build.
 > notebook version, it remains available as the
 > [**v0.3.0 release**](https://github.com/mrtnzram/Chatter/releases/tag/v0.3.0).
 
-![welcome_screen]() ![chatter_screen]()
+![welcome_screen](https://github.com/mrtnzram/Chatter/blob/master/chatter_app/assets/2026-06-17_16-25-52.png) ![chatter_screen](https://github.com/mrtnzram/Chatter/blob/master/chatter_app/assets/2026-06-17_16-26-49.png)
 
 ## Download (recommended)
 
