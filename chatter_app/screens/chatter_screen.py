@@ -75,6 +75,7 @@ from chatter_controller import ChatterController # pyright: ignore
 from spectrogram_view import SpectrogramView, render_spectrogram_tiles # pyright: ignore
 from bout_list import BoutList # pyright: ignore
 from param_input import ParamInput # pyright: ignore
+from band_filter_slider import BandFilterSlider # pyright: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +128,8 @@ class ChatterScreen(Screen):
         self._busy = False       # True while a background thread is running
         self._current_idx: int = 0
         self._zoom_debounce: Optional[object] = None
+        self._view_debounce: Optional[object] = None
+        self._filter_debounce: Optional[object] = None
         self._status_clear_event: Optional[object] = None
         # Monotonic token identifying the latest background render. A worker's
         # result callback ignores itself if this has advanced since it started
@@ -263,15 +266,29 @@ class ChatterScreen(Screen):
         )
         ctrl_panel.add_widget(self._status_label)
 
-        # Row 7: Zoom + minor tick
+        # Row 7: Zoom + Brightness + Contrast + minor tick.
+        # Zoom is narrowed (size_hint_x=0.4) so the two display-only sliders fit
+        # in the same row.
         row7 = BoxLayout(size_hint_y=None, height=48, spacing=14)
-        _lbl(row7, 'Zoom:', font_size=16)
+        _lbl(row7, 'Zoom:', font_size=16, width=70)
         self._zoom_slider = Slider(
             min=0.5, max=3.0, value=1.0, step=0.1,
-            size_hint_x=1, size_hint_y=1,
+            size_hint_x=0.4, size_hint_y=1,
         )
         row7.add_widget(self._zoom_slider)
-        _lbl(row7, 'Minor tick (s):', font_size=16, width=180)
+        _lbl(row7, 'Brightness:', font_size=15, width=80)
+        self._brightness_slider = Slider(
+            min=-0.5, max=0.5, value=0.0, step=0.02,
+            size_hint_x=0.3, size_hint_y=1,
+        )
+        row7.add_widget(self._brightness_slider)
+        _lbl(row7, 'Contrast:', font_size=16, width=90)
+        self._contrast_slider = Slider(
+            min=0.5, max=3.0, value=1.0, step=0.05,
+            size_hint_x=0.3, size_hint_y=1,
+        )
+        row7.add_widget(self._contrast_slider)
+        _lbl(row7, 'Minor tick (s):', font_size=16, width=160)
         self._minor_tick_input = _float_input(row7, '0.1')
         ctrl_panel.add_widget(row7)
 
@@ -319,7 +336,20 @@ class ChatterScreen(Screen):
         )
         self._spec_view = SpectrogramView(size_hint=(None, 1))
         self._scroll.add_widget(self._spec_view)
-        spec_area.add_widget(self._scroll)
+
+        # Band-pass filter slider sits to the LEFT of the scrollable
+        # spectrogram, its frequency axis aligned with the spectrogram's
+        # vertical (frequency) axis.
+        spec_row = BoxLayout(orientation='horizontal', spacing=6)
+        self._band_slider = BandFilterSlider(
+            sr=int(self.ctrl.extractor.sr),
+            highpass=self.ctrl.extractor.highpass_cutoff,
+            lowpass=self.ctrl.extractor.lowpass_cutoff,
+            size_hint=(None, 1), width=dp(44),
+        )
+        spec_row.add_widget(self._band_slider)
+        spec_row.add_widget(self._scroll)
+        spec_area.add_widget(spec_row)
 
     # ------------------------------------------------------------------
     # Callback wiring
@@ -344,6 +374,14 @@ class ChatterScreen(Screen):
         self._minor_tick_input.bind(focus=lambda inst, foc: (
             self._on_minor_tick_commit() if not foc else None
         ))
+
+        # Brightness / contrast → display-only base re-render (debounced, cheap)
+        self._brightness_slider.bind(value=self._on_view_changed)
+        self._contrast_slider.bind(value=self._on_view_changed)
+
+        # Band-pass filter → forced recompute (reloads + re-filters audio).
+        # Fires only when a handle drag ends (release_callback), then debounces.
+        self._band_slider.release_callback = self._on_filter_changed
 
         # Bout list selection → populate onset/offset boxes + spec lines
         self._bout_list.on_selection = self._on_bout_selection_changed
@@ -521,6 +559,8 @@ class ChatterScreen(Screen):
                 tiles, geometry = render_spectrogram_tiles(
                     S_db, int(sr), self.ctrl.extractor.hop_length,
                     zoom_factor=zoom, minor_tick_step=minor,
+                    brightness=self._brightness_slider.value,
+                    contrast=self._contrast_slider.value,
                 )
                 Clock.schedule_once(
                     partial(self._on_recompute_done, gen, idx, bouts, tiles,
@@ -599,6 +639,34 @@ class ChatterScreen(Screen):
     def _on_minor_tick_commit(self, *_):
         self._redraw_base()
 
+    def _on_view_changed(self, slider, value):
+        # Brightness/contrast are display-only — debounce then re-tint the base
+        # tiles from the cached S_db (no audio reload, no feature recompute).
+        if self._view_debounce:
+            self._view_debounce.cancel()
+        self._view_debounce = Clock.schedule_once(
+            lambda _: self._redraw_base(), 0.15
+        )
+
+    def _on_filter_changed(self):
+        # Filter changes detection + display → force a full recompute that
+        # reloads and re-filters the audio. Debounced so a quick adjust-twice
+        # doesn't queue two reloads. Kept isolated so this trigger could become
+        # an explicit Apply button later without touching anything else.
+        if self._filter_debounce:
+            self._filter_debounce.cancel()
+        self._filter_debounce = Clock.schedule_once(
+            lambda _: self._apply_filter_change(), 0.3
+        )
+
+    def _apply_filter_change(self):
+        if self._busy:
+            # Don't drop the change — retry after the current worker finishes.
+            Clock.schedule_once(lambda _dt: self._apply_filter_change(), 0.2)
+            return
+        self.ctrl.invalidate_audio(self._current_idx)
+        self._schedule_recompute(force=True)
+
     def _redraw_base(self):
         if self._busy:
             return
@@ -624,6 +692,8 @@ class ChatterScreen(Screen):
                 tiles, geometry = render_spectrogram_tiles(
                     S_db, int(sr), self.ctrl.extractor.hop_length,
                     zoom_factor=zoom, minor_tick_step=minor,
+                    brightness=self._brightness_slider.value,
+                    contrast=self._contrast_slider.value,
                 )
                 bouts = self.ctrl.current_bouts.get(idx, [])
                 sel = self._bout_list.selected_ids
@@ -849,6 +919,8 @@ class ChatterScreen(Screen):
             'min_silence': self._min_silence.value,
             'min_bout_len': self._min_bout_len.value,
             'pad': self._pad.value,
+            'highpass_cutoff': self._band_slider.highpass_value,
+            'lowpass_cutoff': self._band_slider.lowpass_value,
         }
 
     def _set_param_widgets(self, params: dict):
@@ -858,6 +930,10 @@ class ChatterScreen(Screen):
         self._min_silence.value = params.get('min_silence', 0.9)
         self._min_bout_len.value = params.get('min_bout_len', 1.0)
         self._pad.value = params.get('pad', 0.5)
+        self._band_slider.set_values(
+            params.get('highpass_cutoff', 500.0),
+            params.get('lowpass_cutoff', None),
+        )
 
     def _read_minor_tick(self) -> float:
         try:

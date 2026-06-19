@@ -84,9 +84,18 @@ class ChatterStore:
     # Spectrogram cache (ephemeral)
     # ------------------------------------------------------------------ #
     @staticmethod
-    def make_cache_key(wav_location, sr, hop_length, frame_length) -> str:
-        """Stable hash of the inputs that determine the displayed spectrogram."""
-        raw = f"{wav_location}|{sr}|{hop_length}|{frame_length}"
+    def make_cache_key(wav_location, sr, hop_length, frame_length,
+                       highpass_cutoff=None, lowpass_cutoff=None) -> str:
+        """Stable hash of the inputs that determine the displayed spectrogram.
+
+        The band-pass cutoffs are part of the key because the spectrogram is
+        rendered from the filtered audio — changing a cutoff must yield a fresh
+        spectrogram rather than a stale cache hit.
+        """
+        raw = (
+            f"{wav_location}|{sr}|{hop_length}|{frame_length}"
+            f"|{highpass_cutoff}|{lowpass_cutoff}"
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def get_cached_spectrogram(self, cache_key) -> Optional[tuple]:

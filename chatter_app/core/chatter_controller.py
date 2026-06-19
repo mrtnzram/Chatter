@@ -26,6 +26,10 @@ _DEFAULT_PARAMS = {
     'min_silence': 0.9,
     'min_bout_len': 1.0,
     'pad': 0.5,
+    # Band-pass filter cutoffs (Hz). highpass_cutoff preserves the legacy 500 Hz
+    # high-pass; lowpass_cutoff=None disables the low-pass (full bandwidth).
+    'highpass_cutoff': 500.0,
+    'lowpass_cutoff': None,
 }
 
 
@@ -109,6 +113,15 @@ class ChatterController:
         self.extractor.min_silence = params.get('min_silence', 0.9)
         self.extractor.min_bout_length = params.get('min_bout_len', 1.0)
         self.extractor.pad = params.get('pad', 0.5)
+        self.extractor.highpass_cutoff = params.get('highpass_cutoff', 500.0)
+        self.extractor.lowpass_cutoff = params.get('lowpass_cutoff', None)
+
+    def invalidate_audio(self, idx: int):
+        """Drop the cached waveform so the next recompute reloads + re-filters
+        from disk. Call this when a filter cutoff changes (the spectrogram
+        cache is busted separately via the cutoff-aware cache key)."""
+        if 'audio' in self.df.columns:
+            self.df.at[idx, 'audio'] = None
 
     # ------------------------------------------------------------------
     # Core recompute (run on a background thread)
@@ -358,7 +371,8 @@ class ChatterController:
         # don't collide.
         keyed_path = f"{wav_location}@{chunk_start}" if chunk_start else wav_location
         cache_key = ChatterStore.make_cache_key(
-            keyed_path, sr, self.extractor.hop_length, self.extractor.frame_length
+            keyed_path, sr, self.extractor.hop_length, self.extractor.frame_length,
+            self.extractor.highpass_cutoff, self.extractor.lowpass_cutoff,
         )
         cached = self.store.get_cached_spectrogram(cache_key)
         if cached is not None:

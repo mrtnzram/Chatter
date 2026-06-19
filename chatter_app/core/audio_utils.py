@@ -75,6 +75,13 @@ def highpass_filter(audio, sr, cutoff=500, order=5):
     filtered_audio = filtfilt(b, a, audio)
     return filtered_audio
 
+def lowpass_filter(audio, sr, cutoff, order=5):
+    nyquist = 0.5 * sr
+    normal_cutoff = cutoff / nyquist
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    filtered_audio = filtfilt(b, a, audio)
+    return filtered_audio
+
 def remove_low_amplitude(audio, threshold_db=-35):
     # Convert to decibels
     rms = np.sqrt(np.mean(audio**2))  # Root Mean Square
@@ -96,6 +103,8 @@ class AudioFeatureExtractor:
         pad=0.75,
         active_region_threshold_pct=0.05,  # e.g., 15% of max flux
         min_bout_length=1.0,
+        highpass_cutoff=500,
+        lowpass_cutoff=None,
         model = None,
         use_birdnet=False,
         birdnet_model_path=None
@@ -104,6 +113,11 @@ class AudioFeatureExtractor:
         self.n_mfcc = n_mfcc
         self.hop_length = hop_length
         self.frame_length = frame_length
+        # Band-pass filter cutoffs (Hz). highpass removes content below the
+        # cutoff; lowpass removes content above it. None / out-of-range values
+        # disable the respective filter (see load_audio).
+        self.highpass_cutoff = highpass_cutoff
+        self.lowpass_cutoff = lowpass_cutoff
         self.mfcc_threshold = mfcc_threshold
         self.energy_threshold_pct = energy_threshold_pct
         self.min_silence = min_silence
@@ -182,10 +196,34 @@ class AudioFeatureExtractor:
     def load_audio(self, wav_path, offset=0.0, duration=None):
         audio, sr = librosa.load(wav_path, sr=self.sr, offset=offset, duration=duration)
         audio = remove_low_amplitude(audio, threshold_db=-30)
-        audio = highpass_filter(audio, sr, cutoff=500)
+        audio = self.apply_bandpass(audio, sr)
         if np.max(np.abs(audio)) > 0:
             audio = audio / np.max(np.abs(audio))
         return audio, sr
+
+    def apply_bandpass(self, audio, sr):
+        """Apply the configured high-pass and/or low-pass filters.
+
+        Each filter is applied only when its cutoff is a usable frequency:
+        high-pass requires 0 < cutoff < Nyquist; low-pass requires
+        0 < cutoff < Nyquist. If the requested band is invalid (high-pass
+        cutoff >= low-pass cutoff) both are skipped so we never build an
+        empty/degenerate Butterworth band.
+        """
+        nyquist = 0.5 * sr
+        hp = self.highpass_cutoff
+        lp = self.lowpass_cutoff
+        hp_on = hp is not None and 0 < hp < nyquist
+        lp_on = lp is not None and 0 < lp < nyquist
+        # Invalid band → skip filtering entirely (no-op, avoids passing an
+        # invalid band to the Butterworth design).
+        if hp_on and lp_on and hp >= lp:
+            return audio
+        if hp_on:
+            audio = highpass_filter(audio, sr, cutoff=hp)
+        if lp_on:
+            audio = lowpass_filter(audio, sr, cutoff=lp)
+        return audio
 
     def compute_mfcc(self, audio, sr):
         return librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=self.n_mfcc, hop_length=self.hop_length)
