@@ -76,6 +76,7 @@ from spectrogram_view import SpectrogramView, render_spectrogram_tiles # pyright
 from bout_list import BoutList # pyright: ignore
 from param_input import ParamInput # pyright: ignore
 from band_filter_slider import BandFilterSlider # pyright: ignore
+from tick_slider import TickSlider # pyright: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -277,14 +278,14 @@ class ChatterScreen(Screen):
         )
         row7.add_widget(self._zoom_slider)
         _lbl(row7, 'Brightness:', font_size=15, width=80)
-        self._brightness_slider = Slider(
-            min=-0.5, max=0.5, value=0.0, step=0.02,
+        self._brightness_slider = TickSlider(
+            min=-0.5, max=0.5, value=0.0, step=0.02, default_value=0.0,
             size_hint_x=0.3, size_hint_y=1,
         )
         row7.add_widget(self._brightness_slider)
         _lbl(row7, 'Contrast:', font_size=16, width=90)
-        self._contrast_slider = Slider(
-            min=0.5, max=3.0, value=1.0, step=0.05,
+        self._contrast_slider = TickSlider(
+            min=0.5, max=3.0, value=1.0, step=0.05, default_value=1.0,
             size_hint_x=0.3, size_hint_y=1,
         )
         row7.add_widget(self._contrast_slider)
