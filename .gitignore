@@ -10,7 +10,9 @@ __pycache__/
 # User data produced at runtime — not source files
 chatter.duckdb
 chatter.duckdb.wal
+Songs.duckdb
 bouts.csv
+Songs.csv
 bouts_audio/
 
 # Jupyter artifacts
