@@ -201,6 +201,17 @@ class AudioFeatureExtractor:
             audio = audio / np.max(np.abs(audio))
         return audio, sr
 
+    def load_audio_raw(self, wav_path, offset=0.0, duration=None):
+        """Load audio exactly as recorded, at its native sample rate.
+
+        Unlike load_audio, this applies no amplitude gating, no band-pass
+        (high/low-pass) filtering, and no normalization. Used when exporting
+        bout clips so the written WAV is a faithful crop of the original
+        recording rather than the filtered signal used for detection/display.
+        """
+        audio, sr = librosa.load(wav_path, sr=None, offset=offset, duration=duration)
+        return audio, sr
+
     def apply_bandpass(self, audio, sr):
         """Apply the configured high-pass and/or low-pass filters.
 

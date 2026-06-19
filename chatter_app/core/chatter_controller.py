@@ -321,7 +321,18 @@ class ChatterController:
         if not bouts:
             return False, 'No bouts to export.'
 
-        audio, sr = row['audio'], int(row['sr'])
+        # Crop from the original, unfiltered recording so exported clips are a
+        # faithful copy of the source audio — NOT the band-pass-filtered /
+        # amplitude-gated / normalized signal in row['audio'] (which is only
+        # used for detection and the spectrogram). wavstart/wavend are in
+        # seconds, so they slice correctly at the file's native sample rate.
+        chunk_start = float(row.get('chunk_start') or 0.0)
+        chunk_end = row.get('chunk_end')
+        chunk_dur = float(chunk_end - chunk_start) if chunk_end is not None else None
+        audio, sr = self.extractor.load_audio_raw(
+            row['wav_location'], offset=chunk_start, duration=chunk_dur,
+        )
+        sr = int(sr)
         os.makedirs(output_dir, exist_ok=True)
 
         bout_rows = []
