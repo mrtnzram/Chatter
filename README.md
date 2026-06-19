@@ -6,8 +6,8 @@ Chatter is a desktop application (built with Kivy). The recommended way to use i
 is to download a pre-packaged build.
 
 <p align="center">
-  <img src="chatter_app/assets/2026-06-17_16-25-52.png" width="45%" />
-  <img src="chatter_app/assets/2026-06-17_16-26-49.png" width="45%" />
+  <img src="chatter_app/assets/2026-06-19_10-53-12.png" width="45%" />
+  <img src="chatter_app/assets/2026-06-19_10-54-26.png" width="45%" />
 </p>
 
 

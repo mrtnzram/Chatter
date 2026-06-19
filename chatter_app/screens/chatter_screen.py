@@ -66,10 +66,10 @@ for _p in (_core_dir, _widgets_dir, _app_dir):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from chatter_controller import ChatterController
-from spectrogram_view import SpectrogramView, render_spectrogram_tiles
-from bout_list import BoutList
-from param_input import ParamInput
+from chatter_controller import ChatterController # pyright: ignore
+from spectrogram_view import SpectrogramView, render_spectrogram_tiles # pyright: ignore
+from bout_list import BoutList # pyright: ignore
+from param_input import ParamInput # pyright: ignore
 
 
 # ---------------------------------------------------------------------------
