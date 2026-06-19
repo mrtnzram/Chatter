@@ -162,12 +162,14 @@ class ChatterController:
             self.df.at[idx, 'bouts'] = bouts
             return bouts, {}
 
-        # No saved bouts — run full feature detection. Persist every feature
-        # column back into df so parameters are auto-finalized on each run
-        # (this replaces the old explicit "Finalize Parameters" step).
+        # No saved bouts — run full feature detection with the current params.
+        # Re-running here on every forced recompute is what auto-finalizes the
+        # parameters (the old explicit "Finalize Parameters" step). We persist
+        # only the bouts list: the other feature arrays (mfcc, spectral_flux,
+        # …) are not consumed anywhere in the app, and assigning a 2-D/1-D numpy
+        # array into a single df cell raises a ValueError that previously
+        # surfaced as a spurious "could not load recording" error.
         features = self.extractor.compute_all_features(row)
-        for key, value in features.items():
-            self.df.at[idx, key] = value
         bouts = sorted(features['bouts'], key=lambda b: b['onset'])
         self.current_bouts[idx] = bouts
         self.df.at[idx, 'bouts'] = bouts
