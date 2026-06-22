@@ -80,7 +80,8 @@ Chatter mainly uses librosa's audio extracting features paired with computationa
    - **Recording directory** — the folder of `.wav` files to analyze. Filenames
      should follow `Genus-species-birdid.wav` so Chatter can read each bird's
      metadata.
-   - **CSV export directory** — where `bouts.csv` and `chatter.duckdb` are written.
+   - **CSV export directory** — where `<recname>.csv` and `<recname>.duckdb` are
+     written (both named after your recording directory).
    - **Bouts audio directory** — where exported audio clips are saved.
 
    The CSV and audio directories are auto-filled from the recording folder; you can
@@ -93,10 +94,25 @@ Chatter mainly uses librosa's audio extracting features paired with computationa
    threshold, energy threshold, active-region threshold, min silence, min bout
    length, pad). The spectrogram and detected bouts recompute automatically. The
    defaults work well for most recordings — see
-   [AudioFeatureExtractor Parameters](#audiofeatureextractor-parameters) for what
-   each one does.
+   [Chatter Parameters](#chatter-parameters) for what each one does.
 
-4. **Edit bouts directly on the spectrogram.**
+4. **Tune the frequency band (optional).** The vertical **band-pass filter
+   slider** to the left of the spectrogram restricts detection to a frequency
+   range. Drag its **lower handle** to set the high-pass cutoff (removes energy
+   *below* it, default 500 Hz) and its **upper handle** to set the low-pass
+   cutoff (removes energy *above* it, off by default = full bandwidth). The
+   shaded band between the handles is what is kept. Bouts re-detect when you
+   release a handle. The filter affects **detection and the spectrogram display
+   only** — exported clips are always a faithful, unfiltered crop of the
+   original recording.
+
+5. **Adjust the view (optional, display-only).** Below the parameters, the
+   **Zoom**, **Brightness**, and **Contrast** sliders change how the spectrogram
+   looks without altering the audio or the detected bouts. Use **Brightness**
+   and **Contrast** to make faint songs easier to see; double-click a tick to
+   reset to default.
+
+6. **Edit bouts directly on the spectrogram.**
    - **Drag** the spectrogram to scroll through time.
    - **Shift + Drag** to add a new bout over a region.
    - **Cmd/Ctrl + Drag** an onset/offset line to move that boundary.
@@ -105,18 +121,19 @@ Chatter mainly uses librosa's audio extracting features paired with computationa
    **Add Bout**, or **Remove Bouts**. If a good bout is wrongly flagged as an
    outlier, select it and click **Mark Not Outlier**.
 
-5. **Finalize & export.**
+7. **Finalize & export.**
    - **Finalize Parameters** saves the current parameter settings for the selected
      bird (only needed if you changed parameters from the defaults).
    - **Export Bouts** writes each bout as an audio clip to the bouts audio directory
-     and appends bout metadata to `bouts.csv` + `chatter.duckdb`. If a `bouts.csv`
-     already exists, Chatter appends to it, so you can return to your progress
+     and saves bout metadata to `<recname>.duckdb` + `<recname>.csv`. Reopening the
+     same project reloads this, so you can return to your progress
      anytime. The **Pad** parameter controls how much extra audio (in seconds) is
      kept before each bout's onset and after its offset in the exported clips — so
      the clips include a little lead-in/lead-out rather than cutting off exactly at
-     the detected boundaries.
+     the detected boundaries. Exported clips are cut from the **original
+     recording** — the band-pass filter and display adjustments are not baked in.
 
-6. **Start over.** **New Project** (top-right) returns to the Welcome screen to pick
+8. **Start over.** **New Project** (top-right) returns to the Welcome screen to pick
    a different dataset. Un-exported edits are lost, so export first.
 
 > **Tip:** 30-second to 1-minute recordings work best. Longer files make
@@ -200,50 +217,126 @@ The spectrogram and detected bouts recompute automatically as you change them.
 
   Amount of time (in seconds) to pad around detected bouts — before the onset and after the offset — when exporting each bout as a wav file.
 
-# DataFrames in Chatter
+- **Band-pass filter** (`highpass_cutoff` / `lowpass_cutoff`)  
 
-## 1. `df` (Main DataFrame)
+  *defaults: high-pass 500 Hz, low-pass off (full bandwidth)*  
 
-This is the **primary DataFrame** created by your pipeline (typically via `create_initial_dataset`).  
-Each row represents a single audio recording (song) for a bird.
+  The vertical two-handle slider to the left of the spectrogram. The lower
+  handle is the **high-pass cutoff** (removes energy below it); the upper handle
+  is the **low-pass cutoff** (removes energy above it). The track runs linearly
+  from 0 Hz at the bottom to the Nyquist frequency (`sr / 2`) at the top, so it
+  lines up with the spectrogram's frequency axis. Bouts re-detect when a handle
+  is released. This filter is applied to the signal used for **detection and the
+  spectrogram only** — exported audio clips are an unfiltered crop of the
+  original recording.
 
-**Typical columns:**
-- `species`: Bird species name or code.
-- `bird_id`: Unique identifier for the bird.
-- `wav_location`: Path to the audio file.
-- `song_id`: Unique identifier for the song/recording.
-- `audio`: Loaded audio waveform (numpy array).
-- `sr`: Sampling rate of the audio.
-- `bouts`: List of detected bouts for this song (each bout is a dict with onset/offset/etc.).
-- Feature columns (may include):  
-  - `rms_energy`: RMS energy per frame.
-  - `spectral_flux`: Spectral flux per frame.
-  - `mfcc`: MFCCs per frame.
-  - `active_regions`, `refined_regions`: Boolean masks for activity/bout detection.
+## Display Settings (view only)
 
----
+These sliders on the main screen change how the spectrogram is rendered. They do
+**not** affect the audio, the detected bouts, or anything that gets exported.
 
-## 2. `chatter.bouts_df` (Exported Bouts DataFrame)
+- **Zoom**  
 
-This DataFrame is created when you export bouts (e.g., with the "Export Bouts" button).  
-**Each row represents a single detected bout** (segment of interest) from a song.
+  *default: 1.0 (range 0.5–3.0)*  
 
-**Columns:**
-- `species`: Bird species name or code.
-- `bird_id`: Unique identifier for the bird.
-- `wav_location`: Path to the original audio file.
-- `song_id`: Unique identifier for the song/recording.
-- `bout_id`: Index of the bout within the song.
-- `duration`: Duration of the bout (seconds).
-- `onset`: Start time of the bout (seconds).
-- `offset`: End time of the bout (seconds).
-- `wavstart`: Start time of the exported audio clip (with padding, seconds).
-- `wavend`: End time of the exported audio clip (with padding, seconds).
-- `intersong_interval`: Time since the previous bout ended (seconds, or `None` for the first bout).
-- `bout_wav`: Path to the exported audio file for this bout.
+  Horizontal (time-axis) magnification of the spectrogram.
 
----
+- **Brightness**  
 
+  *default: 0.0 (range -0.5–0.5)*  
+
+  Shifts the spectrogram lighter or darker. Useful for making faint songs more
+  visible.
+
+- **Contrast**  
+
+  *default: 1.0 (range 0.5–3.0)*  
+
+  Stretches or compresses the spectrogram's dynamic range about mid-grey to
+  sharpen or soften the difference between song and background.
+
+# How Chatter Stores Data
+
+Chatter keeps your work in three places. Two live **on disk** in the CSV export
+directory you chose on the Welcome screen and survive restarts; one is purely
+**in memory** and exists only while the app is open. All three are named after
+your **recording directory** (referred to below as `<recname>`), so every dataset
+keeps its own separate files and projects never bleed into each other.
+
+## Persistent storage (on disk, survives restarts)
+
+### `<recname>.duckdb`
+
+A [DuckDB](https://duckdb.org/) database file written to the CSV export
+directory. It holds the **`bouts` table**: one row per exported bout, with the
+columns listed below. This is the authoritative record of your exported work.
+
+When you reopen a project pointed at the same recording directory, Chatter reads
+this file and pre-populates everything you exported before — already-exported
+birds are marked in the dropdown, so you can pick up exactly where you left off.
+Each `Export Bouts` action *replaces* the stored bouts for that recording, so
+removing or editing a bout and re-exporting keeps the database in sync rather
+than piling up stale rows.
+
+### `<recname>.csv`
+
+A flat CSV written alongside the DuckDB file and **regenerated from the database
+every time you export**. It contains the exact same bout rows as the `bouts`
+table, in a format that's easy to open in Excel, R, or pandas for downstream
+analysis.
+
+The CSV is also a migration path: if you start a project and the DuckDB file is
+empty (or missing) but a `<recname>.csv` already exists, Chatter imports the CSV
+into the database once on launch — so older CSV-only projects lose nothing.
+
+**Columns in `<recname>.duckdb` / `<recname>.csv`** (one row per bout):
+
+| Column | Description |
+| --- | --- |
+| `species` | Bird species name or code. |
+| `bird_id` | Identifier for the bird. |
+| `wav_location` | Path to the original recording. |
+| `song_id` | Identifier for the recording/song. |
+| `bout_id` | Index of the bout within the recording. |
+| `duration` | Bout length in seconds (`offset − onset`). |
+| `onset` | Bout start time (seconds, unpadded). |
+| `offset` | Bout end time (seconds, unpadded). |
+| `wavstart` | Start of the exported clip (with **Pad**, seconds). |
+| `wavend` | End of the exported clip (with **Pad**, seconds). |
+| `intersong_interval` | Gap since the previous bout ended (seconds; empty for the first bout). |
+| `bout_wav` | Path to the exported audio clip for this bout. |
+
+The exported audio clips themselves are written to the **Bouts audio directory**
+as individual `.wav` files (named `species_birdid_bout<n>.wav`) and cut from the
+**original, unfiltered recording**.
+
+## Temporary storage (in memory, cleared on exit)
+
+### Spectrogram cache
+
+To keep scrolling and switching between birds fast, Chatter caches computed
+spectrograms in an **in-memory** DuckDB database (never written to disk). It is
+created empty on every launch, bounded to a handful of recent spectrograms
+(least-recently-used entries are evicted), and freed completely when you close
+the app or start a New Project.
+
+The cache key includes the recording, the audio feature settings, and the
+band-pass filter cutoffs — so changing a frequency cutoff produces a fresh
+spectrogram instead of a stale cached one. Brightness and Contrast are applied
+on top of the cached image at display time, so adjusting them is instant and
+never invalidates the cache.
+
+### `df` — the in-session working table
+
+While the app is running, all recordings live in a single in-memory pandas
+DataFrame (`df`), one row per recording, holding the loaded `audio`, sample rate
+`sr`, the working list of `bouts`, and the computed feature arrays (`mfcc`,
+`spectral_flux`, `rms_energy`, `active_regions`, `refined_regions`). This is
+where your live edits accumulate; nothing here is permanent until you
+**Export Bouts**, which is what writes it out to the DuckDB + CSV files above.
+
+> **Heads up:** Un-exported edits are only held in memory. Switching projects or
+> closing the app discards them — export before you leave.
 
 ## Notes
 
