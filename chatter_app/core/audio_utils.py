@@ -13,7 +13,7 @@ from scipy.signal import butter, filtfilt
 from sklearn.metrics.pairwise import cosine_distances
 
 try:
-    from birdnetlib import Model, Recording
+    from birdnetlib import Model, Recording  # type: ignore
 except ImportError:
     Recording = None
     Model = None

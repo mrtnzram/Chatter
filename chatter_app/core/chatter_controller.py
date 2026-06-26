@@ -15,7 +15,7 @@ _core_dir = os.path.dirname(__file__)
 if _core_dir not in sys.path:
     sys.path.insert(0, _core_dir)
 
-from chatter_store import ChatterStore
+from chatter_store import ChatterStore  # noqa: E402
 
 _DEFAULT_PARAMS = {
     "mfcc_threshold": 0.5,
@@ -400,13 +400,13 @@ class ChatterController:
         the first chunk.
         """
         row = self.df.iloc[idx]
-        chunk_num = int(row.get('chunk_num') or 0)
+        chunk_num = int(row.get("chunk_num") or 0)
         if chunk_num <= 1:
             return 0
-        same_file = self.df[self.df['wav_location'] == row['wav_location']]
+        same_file = self.df[self.df["wav_location"] == row["wav_location"]]
         return sum(
             len(self.current_bouts.get(int(i), []))
-            for i in same_file[same_file['chunk_num'] < chunk_num].index
+            for i in same_file[same_file["chunk_num"] < chunk_num].index
         )
 
     # ------------------------------------------------------------------
