@@ -78,12 +78,17 @@ class BoutList(RecycleView):
     # Public API
     # ------------------------------------------------------------------
 
-    def set_bouts(self, bouts: list):
-        """Rebuild rows from a list of bout dicts.  Clears current selection."""
+    def set_bouts(self, bouts: list, label_offset: int = 0):
+        """Rebuild rows from a list of bout dicts.  Clears current selection.
+
+        ``label_offset`` shifts the displayed bout number without affecting the
+        internal 0-based selection indices (which always index into the current
+        chunk's bout list).
+        """
         self.selected_ids = []
         self.data = [
             {
-                'text': _bout_label(i, b),
+                'text': _bout_label(label_offset + i, b),
                 'selected': False,
             }
             for i, b in enumerate(bouts)

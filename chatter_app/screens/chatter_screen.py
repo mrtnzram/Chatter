@@ -588,7 +588,7 @@ class ChatterScreen(Screen):
             return
         self._spec_view.set_base_tiles(tiles, geometry)
         self._spec_view.update_bouts(bouts, [])
-        self._bout_list.set_bouts(bouts)
+        self._bout_list.set_bouts(bouts, label_offset=self.ctrl.get_bout_label_offset(idx))
         self._loading_label.text = ''
         self._set_status(f'Loaded {len(bouts)} bout(s).')
         self._set_busy(False)
@@ -907,7 +907,7 @@ class ChatterScreen(Screen):
             sel = [i for i in self._bout_list.selected_ids if i < len(bouts)]
         else:
             sel = [i for i in sel if i < len(bouts)]
-        self._bout_list.set_bouts(bouts)
+        self._bout_list.set_bouts(bouts, label_offset=self.ctrl.get_bout_label_offset(self._current_idx))
         if sel:
             self._bout_list.set_selection(sel)
         self._spec_view.update_bouts(bouts, sel)
