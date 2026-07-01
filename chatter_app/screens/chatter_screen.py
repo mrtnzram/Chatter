@@ -32,11 +32,10 @@ import os
 import sys
 import threading
 from functools import partial
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 
-from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.effects.dampedscroll import DampedScrollEffect
@@ -156,14 +155,17 @@ class ChatterScreen(Screen):
         root = BoxLayout(orientation='vertical', padding=18, spacing=14)
         self.add_widget(root)
 
-        # ---- Control panel (auto-sizes to its content so nothing clips) ----
-        ctrl_panel = BoxLayout(orientation='vertical', size_hint_y=None,
-                               spacing=12)
-        ctrl_panel.bind(minimum_height=ctrl_panel.setter('height'))
+        # ---- Control panel (proportional — rescales with the window) ----
+        # Sized as a fraction of the window (not a fixed pixel block) so the
+        # controls shrink/grow with the maximized window across monitors of
+        # differing resolution instead of overflowing or clipping. The
+        # size_hint_min_y floor keeps it usable on a small/restored window.
+        ctrl_panel = BoxLayout(orientation='vertical', size_hint_y=0.42,
+                               size_hint_min_y=dp(360), spacing=12)
         root.add_widget(ctrl_panel)
 
         # Row 1: Bird selector (its own row, visually separated below)
-        row1 = BoxLayout(size_hint_y=None, height=56, spacing=12)
+        row1 = BoxLayout(size_hint_y=1.1, spacing=12)
         _lbl(row1, 'Select Bird:', font_size=15)
         self._bird_spinner = Spinner(
             text='', font_size=sp(18),
@@ -197,7 +199,7 @@ class ChatterScreen(Screen):
         _divider(ctrl_panel)
 
         # Row 2: Detection params A — centred in the available width
-        row2_wrap = AnchorLayout(size_hint_y=None, height=50, anchor_x='center')
+        row2_wrap = AnchorLayout(size_hint_y=1.0, anchor_x='center')
         row2 = BoxLayout(size_hint_x=0.75, spacing=20)
         self._mfcc_thresh = _param_input(row2, 'MFCC Thresh:', 0.5)
         self._energy_thresh = _param_input(row2, 'Energy Thresh:', 0.1)
@@ -206,7 +208,7 @@ class ChatterScreen(Screen):
         ctrl_panel.add_widget(row2_wrap)
 
         # Row 3: Detection params B — centred in the available width
-        row3_wrap = AnchorLayout(size_hint_y=None, height=50, anchor_x='center')
+        row3_wrap = AnchorLayout(size_hint_y=1.0, anchor_x='center')
         row3 = BoxLayout(size_hint_x=0.75, spacing=20)
         self._min_silence = _param_input(row3, 'Min Silence:', 0.9)
         self._min_bout_len = _param_input(row3, 'Min Bout Len:', 1.0)
@@ -217,7 +219,7 @@ class ChatterScreen(Screen):
         _divider(ctrl_panel)
 
         # Row 4: Bout list (tall — shows several bouts) + Remove + Not Outlier
-        row4 = BoxLayout(size_hint_y=None, height=190, spacing=14)
+        row4 = BoxLayout(size_hint_y=3.6, size_hint_min_y=dp(120), spacing=14)
         self._bout_list = BoutList(size_hint_x=1, size_hint_y=1)
         row4.add_widget(self._bout_list)
         btn_col = BoxLayout(orientation='vertical', size_hint_x=None,
@@ -234,31 +236,34 @@ class ChatterScreen(Screen):
         # Row 5: Onset / Offset / Update / Add (left) · Refresh / Export (right).
         # A flexible spacer pushes Refresh + Export to the right edge so they
         # sit on the same baseline as the onset/offset inputs.
-        row5 = BoxLayout(size_hint_y=None, height=56, spacing=12)
-        _lbl(row5, 'Onset:')
-        self._onset_input = _float_input(row5, '0.000', font_size=20, width=130)
-        _lbl(row5, 'Offset:')
-        self._offset_input = _float_input(row5, '0.000', font_size=20, width=130)
+        row5 = BoxLayout(size_hint_y=1.1, spacing=8)
+        _lbl(row5, 'Onset:', width=64)
+        self._onset_input = _float_input(row5, '0.000', font_size=20, width=104)
+        _lbl(row5, 'Offset:', width=64)
+        self._offset_input = _float_input(row5, '0.000', font_size=20, width=104)
         self._update_btn = _btn(row5, 'Update Bout',
                                 bg=(0.65, 0.45, 0.0, 1),
-                                font_size=22, height=56, width=210)
+                                font_size=20, height=56, width=160)
         self._add_btn = _btn(row5, 'Add Bout',
                              bg=(0.1, 0.5, 0.1, 1),
-                             font_size=22, height=56, width=210)
+                             font_size=20, height=56, width=140)
         row5.add_widget(Widget(size_hint_x=1))   # flexible spacer
+        self._reset_btn = _btn(row5, 'Reset to Defaults',
+                               bg=(0.45, 0.35, 0.1, 1), height=56,
+                               width=160, font_size=15)
         self._refresh_btn = _btn(row5, 'Refresh',
                                  bg=(0.0, 0.55, 0.55, 1), height=56,
-                                 width=200, font_size=16)
+                                 width=120, font_size=15)
         self._export_btn = _btn(row5, 'Export Bouts',
                                 bg=(0.0, 0.35, 0.6, 1), height=56,
-                                width=200, font_size=16)
+                                width=150, font_size=15)
         ctrl_panel.add_widget(row5)
 
-        # Status bar — fixed height (reserves room for up to two lines) so the
-        # spectrogram below never shifts as messages appear/clear/wrap.
+        # Status bar — scales with the panel but keeps a minimum height so
+        # two-line (wrapped) messages don't clip at small window sizes.
         self._status_label = Label(
             text='Ready.',
-            size_hint_y=None, height=dp(52),
+            size_hint_y=1.0, size_hint_min_y=dp(44),
             font_size=sp(20), color=(0.7, 0.9, 0.7, 1),
             halign='left', valign='top',
         )
@@ -270,7 +275,7 @@ class ChatterScreen(Screen):
         # Row 7: Zoom + Brightness + Contrast + minor tick.
         # Zoom is narrowed (size_hint_x=0.4) so the two display-only sliders fit
         # in the same row.
-        row7 = BoxLayout(size_hint_y=None, height=48, spacing=14)
+        row7 = BoxLayout(size_hint_y=1.0, spacing=14)
         _lbl(row7, 'Zoom:', font_size=16, width=70)
         self._zoom_slider = Slider(
             min=0.5, max=3.0, value=1.0, step=0.1,
@@ -294,7 +299,10 @@ class ChatterScreen(Screen):
         ctrl_panel.add_widget(row7)
 
         # ---- Spectrogram area ----------------------------------------
-        spec_area = BoxLayout(orientation='vertical', spacing=10)
+        # Takes the majority share of the window; floor keeps it visible on a
+        # small/restored window so it never collapses to nothing.
+        spec_area = BoxLayout(orientation='vertical', spacing=10,
+                              size_hint_y=0.58, size_hint_min_y=dp(200))
         root.add_widget(spec_area)
 
         # Top bar: shift-to-add hint + loading indicator.
@@ -399,6 +407,7 @@ class ChatterScreen(Screen):
 
         # Action buttons
         self._back_btn.bind(on_release=self._on_back)
+        self._reset_btn.bind(on_release=self._on_reset_params)
         self._refresh_btn.bind(on_release=self._on_refresh)
         self._export_btn.bind(on_release=self._on_export)
 
@@ -625,6 +634,21 @@ class ChatterScreen(Screen):
         self._set_busy(False)
         self._set_status('Refreshing spectrogram...')
         self._schedule_recompute(force=False)
+
+    def _on_reset_params(self, *_):
+        """Reset detection params + band filter to defaults and recompute.
+
+        Setting the widget values doesn't fire their commit callbacks, so we
+        drive the recompute explicitly. Reuse ``_apply_filter_change`` because
+        resetting may change the band-pass cutoffs, which requires reloading and
+        re-filtering the audio before detection reruns.
+        """
+        if self._busy and self._loading_label.text.startswith('Exporting'):
+            self._set_status('Export in progress — please wait.')
+            return
+        self._set_param_widgets(self.ctrl.get_default_params())
+        self._set_status('Reset to default parameters.')
+        self._apply_filter_change()
 
     # ------------------------------------------------------------------
     # Base re-render (zoom/minor-tick change — no feature recompute)
@@ -1026,10 +1050,13 @@ def _float_input(parent, default_text: str = '0.0', font_size: int = 15,
 
 def _btn(parent, text: str, bg=(0.2, 0.2, 0.2, 1), font_size: int = 19,
          width: int = 190, height: int = 48) -> Button:
+    # Fill the parent row's height (which now scales with the window) instead
+    # of a fixed pixel height. ``height`` is kept for call-site compatibility
+    # but no longer constrains the button.
     b = Button(
         text=text,
         size_hint_x=None, width=dp(width),
-        size_hint_y=None, height=height,
+        size_hint_y=1,
         font_size=sp(font_size),
         background_color=bg,
         background_normal='',

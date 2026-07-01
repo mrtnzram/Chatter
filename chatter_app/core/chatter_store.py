@@ -161,6 +161,14 @@ class ChatterStore:
         )
         self._bouts_con.unregister("new_bouts")
 
+    def get_bout_wavs(self, species, bird_id, song_id) -> list:
+        """Return the bout_wav file paths currently stored for one recording."""
+        rows = self._bouts_con.execute(
+            "SELECT bout_wav FROM bouts WHERE species = ? AND bird_id = ? AND song_id = ?",
+            [str(species), str(bird_id), int(song_id)],
+        ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
     def get_bouts_df(self) -> pd.DataFrame:
         """Return all stored bouts as a pandas DataFrame (drop-in for the old
         ``self.bouts_df``)."""

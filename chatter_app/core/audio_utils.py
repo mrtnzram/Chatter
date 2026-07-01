@@ -103,7 +103,7 @@ def remove_low_amplitude(audio, threshold_db=-35):
 class AudioFeatureExtractor:
     def __init__(
         self,
-        sr=22050,
+        sr=44100,
         n_mfcc=13,
         hop_length=512,
         frame_length=2048,
