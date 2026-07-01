@@ -408,7 +408,12 @@ class ChatterController:
             )
             prev_offset = offset
 
-        # Remove orphaned clips from a prior, larger export of this recording.
+        # Persist first so the DB/CSV are the source of truth, then best-effort
+        # delete clips a prior, larger export left behind. Deleting only after a
+        # successful upsert avoids losing old clips if persistence fails.
+        self.store.upsert_bouts(bout_rows)
+        self.store.export_bouts_csv()
+
         new_wavs = {r["bout_wav"] for r in bout_rows}
         for stale in old_wavs - new_wavs:
             try:
@@ -416,9 +421,6 @@ class ChatterController:
                     os.remove(stale)
             except OSError:
                 pass  # non-fatal — leave a stale file rather than fail export
-
-        self.store.upsert_bouts(bout_rows)
-        self.store.export_bouts_csv()
         self.exported_idxs.add(idx)
         label = f"{row['species']} {row['bird_id']}"
         return True, f"Exported {len(bout_rows)} bouts for {label}."

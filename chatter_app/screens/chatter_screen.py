@@ -259,11 +259,11 @@ class ChatterScreen(Screen):
                                 width=150, font_size=15)
         ctrl_panel.add_widget(row5)
 
-        # Status bar — fixed height (reserves room for up to two lines) so the
-        # spectrogram below never shifts as messages appear/clear/wrap.
+        # Status bar — scales with the panel but keeps a minimum height so
+        # two-line (wrapped) messages don't clip at small window sizes.
         self._status_label = Label(
             text='Ready.',
-            size_hint_y=1.0,
+            size_hint_y=1.0, size_hint_min_y=dp(44),
             font_size=sp(20), color=(0.7, 0.9, 0.7, 1),
             halign='left', valign='top',
         )
