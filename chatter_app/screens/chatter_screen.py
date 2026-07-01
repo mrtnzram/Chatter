@@ -236,24 +236,27 @@ class ChatterScreen(Screen):
         # Row 5: Onset / Offset / Update / Add (left) · Refresh / Export (right).
         # A flexible spacer pushes Refresh + Export to the right edge so they
         # sit on the same baseline as the onset/offset inputs.
-        row5 = BoxLayout(size_hint_y=1.1, spacing=12)
-        _lbl(row5, 'Onset:')
-        self._onset_input = _float_input(row5, '0.000', font_size=20, width=130)
-        _lbl(row5, 'Offset:')
-        self._offset_input = _float_input(row5, '0.000', font_size=20, width=130)
+        row5 = BoxLayout(size_hint_y=1.1, spacing=8)
+        _lbl(row5, 'Onset:', width=64)
+        self._onset_input = _float_input(row5, '0.000', font_size=20, width=104)
+        _lbl(row5, 'Offset:', width=64)
+        self._offset_input = _float_input(row5, '0.000', font_size=20, width=104)
         self._update_btn = _btn(row5, 'Update Bout',
                                 bg=(0.65, 0.45, 0.0, 1),
-                                font_size=22, height=56, width=210)
+                                font_size=20, height=56, width=160)
         self._add_btn = _btn(row5, 'Add Bout',
                              bg=(0.1, 0.5, 0.1, 1),
-                             font_size=22, height=56, width=210)
+                             font_size=20, height=56, width=140)
         row5.add_widget(Widget(size_hint_x=1))   # flexible spacer
+        self._reset_btn = _btn(row5, 'Reset to Defaults',
+                               bg=(0.45, 0.35, 0.1, 1), height=56,
+                               width=160, font_size=15)
         self._refresh_btn = _btn(row5, 'Refresh',
                                  bg=(0.0, 0.55, 0.55, 1), height=56,
-                                 width=200, font_size=16)
+                                 width=120, font_size=15)
         self._export_btn = _btn(row5, 'Export Bouts',
                                 bg=(0.0, 0.35, 0.6, 1), height=56,
-                                width=200, font_size=16)
+                                width=150, font_size=15)
         ctrl_panel.add_widget(row5)
 
         # Status bar — fixed height (reserves room for up to two lines) so the
@@ -404,6 +407,7 @@ class ChatterScreen(Screen):
 
         # Action buttons
         self._back_btn.bind(on_release=self._on_back)
+        self._reset_btn.bind(on_release=self._on_reset_params)
         self._refresh_btn.bind(on_release=self._on_refresh)
         self._export_btn.bind(on_release=self._on_export)
 
@@ -630,6 +634,21 @@ class ChatterScreen(Screen):
         self._set_busy(False)
         self._set_status('Refreshing spectrogram...')
         self._schedule_recompute(force=False)
+
+    def _on_reset_params(self, *_):
+        """Reset detection params + band filter to defaults and recompute.
+
+        Setting the widget values doesn't fire their commit callbacks, so we
+        drive the recompute explicitly. Reuse ``_apply_filter_change`` because
+        resetting may change the band-pass cutoffs, which requires reloading and
+        re-filtering the audio before detection reruns.
+        """
+        if self._busy and self._loading_label.text.startswith('Exporting'):
+            self._set_status('Export in progress — please wait.')
+            return
+        self._set_param_widgets(self.ctrl.get_default_params())
+        self._set_status('Reset to default parameters.')
+        self._apply_filter_change()
 
     # ------------------------------------------------------------------
     # Base re-render (zoom/minor-tick change — no feature recompute)

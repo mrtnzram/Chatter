@@ -37,11 +37,23 @@ class ChatterController:
     ):
         self.df = df
         self.extractor = extractor
+        # Project defaults: base params overridden by the band-pass cutoffs the
+        # user chose on the welcome screen (carried on the extractor). These seed
+        # unvisited recordings and are what "Reset to Defaults" restores.
+        self.default_params = dict(_DEFAULT_PARAMS)
+        self.default_params["highpass_cutoff"] = getattr(
+            extractor, "highpass_cutoff", _DEFAULT_PARAMS["highpass_cutoff"]
+        )
+        self.default_params["lowpass_cutoff"] = getattr(
+            extractor, "lowpass_cutoff", _DEFAULT_PARAMS["lowpass_cutoff"]
+        )
         self.store = ChatterStore(duckdb_path=duckdb_path, csv_path=csv_path)
         # idx → list of bout dicts (in-session edits, not yet persisted)
         self.current_bouts: dict = {}
         # idx → param dict
         self.bird_params: dict = {}
+        # Most recently applied params — carried forward to unvisited recordings
+        self._last_params: dict | None = None
         # idxs that have been exported to DuckDB + WAV files this session or previously
         self.exported_idxs: set = set()
         # Ensure columns expected downstream always exist
@@ -106,11 +118,18 @@ class ChatterController:
 
     def get_params(self, idx: int) -> dict:
         if idx not in self.bird_params:
-            self.bird_params[idx] = dict(_DEFAULT_PARAMS)
+            # Seed an unvisited recording from the last-used params so the
+            # user's tuning carries forward; fall back to project defaults.
+            template = self._last_params or self.default_params
+            self.bird_params[idx] = dict(template)
         return dict(self.bird_params[idx])
 
     def save_params(self, idx: int, params: dict):
         self.bird_params[idx] = dict(params)
+        self._last_params = dict(params)
+
+    def get_default_params(self) -> dict:
+        return dict(self.default_params)
 
     def _apply_params(self, params: dict):
         self.extractor.mfcc_threshold = params.get("mfcc_threshold", 0.5)
@@ -351,6 +370,13 @@ class ChatterController:
 
         bout_id_offset = self.get_bout_label_offset(idx)
 
+        # Capture clips from this recording's previous export (before the DB
+        # upsert wipes those rows) so we can delete any that the new, possibly
+        # smaller, set no longer produces.
+        old_wavs = set(
+            self.store.get_bout_wavs(row["species"], row["bird_id"], row["song_id"])
+        )
+
         bout_rows = []
         prev_offset = None
         for bout_id, bout in enumerate(bouts, start=bout_id_offset):
@@ -381,6 +407,15 @@ class ChatterController:
                 }
             )
             prev_offset = offset
+
+        # Remove orphaned clips from a prior, larger export of this recording.
+        new_wavs = {r["bout_wav"] for r in bout_rows}
+        for stale in old_wavs - new_wavs:
+            try:
+                if os.path.exists(stale):
+                    os.remove(stale)
+            except OSError:
+                pass  # non-fatal — leave a stale file rather than fail export
 
         self.store.upsert_bouts(bout_rows)
         self.store.export_bouts_csv()

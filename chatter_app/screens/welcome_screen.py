@@ -139,7 +139,7 @@ class WelcomeScreen(Screen):
         content.add_widget(audio_lbl)
 
         arow1 = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
-        self._sr_input    = _num_field(arow1, 'Sample Rate:', 22050)
+        self._sr_input    = _num_field(arow1, 'Sample Rate:', 44100)
         self._nmfcc_input = _num_field(arow1, 'MFCC Count:',  13)
         content.add_widget(arow1)
 
@@ -147,6 +147,13 @@ class WelcomeScreen(Screen):
         self._hop_input   = _num_field(arow2, 'Hop Length:',   512)
         self._frame_input = _num_field(arow2, 'Frame Length:', 2048)
         content.add_widget(arow2)
+
+        # Band-pass cutoffs (Hz) applied before detection/display. Low-pass is
+        # optional — leave blank to disable it (full bandwidth).
+        arow3 = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10))
+        self._hp_input = _num_field(arow3, 'High-pass (Hz):', 500)
+        self._lp_input = _num_field(arow3, 'Low-pass (Hz):', None, hint='off')
+        content.add_widget(arow3)
 
         content.add_widget(_thin_divider())
 
@@ -290,6 +297,25 @@ class WelcomeScreen(Screen):
             self._set_error('Audio feature settings must be positive.')
             return
 
+        # Band-pass cutoffs: high-pass defaults, low-pass optional (blank = off).
+        try:
+            hp_text = self._hp_input.text.strip()
+            lp_text = self._lp_input.text.strip()
+            highpass = int(hp_text) if hp_text else None
+            lowpass = int(lp_text) if lp_text else None
+        except ValueError:
+            self._set_error('Filter cutoffs must be whole numbers, or blank.')
+            return
+        if (highpass is not None and highpass <= 0) or \
+           (lowpass is not None and lowpass <= 0):
+            self._set_error('Filter cutoffs must be positive.')
+            return
+        if highpass is not None and lowpass is not None and highpass >= lowpass:
+            self._set_error('High-pass cutoff must be below the low-pass cutoff.')
+            return
+        audio_params['highpass_cutoff'] = highpass
+        audio_params['lowpass_cutoff'] = lowpass
+
         self._status.color = (0.65, 0.90, 0.65, 1)
         self._status.text  = 'Initializing...'
         self._launch_btn.disabled = True
@@ -321,8 +347,13 @@ def _thin_divider() -> Widget:
     return d
 
 
-def _num_field(row: BoxLayout, label_text: str, default: int) -> TextInput:
-    """Append a labelled integer field to *row*. Returns the TextInput."""
+def _num_field(row: BoxLayout, label_text: str, default,
+               hint: str = '') -> TextInput:
+    """Append a labelled integer field to *row*. Returns the TextInput.
+
+    *default* may be None to start the field blank (used for optional settings
+    like the low-pass cutoff, where blank means "disabled").
+    """
     lbl = Label(
         text=label_text,
         size_hint_x=None, width=dp(110),
@@ -333,7 +364,8 @@ def _num_field(row: BoxLayout, label_text: str, default: int) -> TextInput:
     lbl.bind(size=lbl.setter('text_size'))
 
     ti = TextInput(
-        text=str(default),
+        text='' if default is None else str(default),
+        hint_text=hint,
         multiline=False,
         input_filter='int',
         font_size=sp(13),

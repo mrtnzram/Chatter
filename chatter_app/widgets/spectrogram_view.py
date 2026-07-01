@@ -365,17 +365,21 @@ class SpectrogramView(Widget):
                 Color(*self._COL_OFFSET)
                 Line(points=[x_off, 0, x_off, h], width=2)
 
-                # Bout number label — bottom of the span
+                # Bout number label — upper-right (offset side), clear of the
+                # top time-axis strip, so it no longer covers low-freq song.
                 tag = f'Bout {i}'
                 core = CoreLabel(text=tag, font_size=_BOUT_FONT, bold=True)
                 core.refresh()
                 tex = core.texture
                 tw, th = tex.size
-                ly = 15  # sit just above the bottom edge
+                ly = h - _AXIS_H - th - 4
+                # Right-align at the offset line; clamp so narrow bouts don't
+                # spill past their own onset.
+                lx = max(x_off - tw - 6, x_on + 2)
                 Color(0.0, 0.0, 0.0, 0.65)
-                Rectangle(pos=(x_on + 2, ly - 2), size=(tw + 8, th + 4))
+                Rectangle(pos=(lx - 4, ly - 2), size=(tw + 8, th + 4))
                 Color(1.0, 0.85, 0.85, 1.0) if is_outlier else Color(1.0, 1.0, 1.0, 1.0)
-                Rectangle(texture=tex, pos=(x_on + 6, ly), size=(tw, th))
+                Rectangle(texture=tex, pos=(lx, ly), size=(tw, th))
 
             # Draft region (during click-drag-to-add)
             if self._draft_onset is not None and self._draft_offset is not None:
