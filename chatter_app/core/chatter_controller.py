@@ -71,34 +71,56 @@ class ChatterController:
         saved = self.store.get_bouts_df()
         if saved.empty:
             return
-        for (species, bird_id, song_id), group in saved.groupby(
-            ["species", "bird_id", "song_id"]
+        # Match on the wav filename rather than song_id: song_id is a rank
+        # assigned by position within a directory scan, so it shifts whenever
+        # the set of scanned recordings differs from the scan that produced
+        # the saved bouts (e.g. reloading annotations exported from a
+        # different directory scope). The filename is stable regardless.
+        saved = saved.assign(_wav_basename=saved["wav_location"].apply(os.path.basename))
+        df_basename = self.df["wav_location"].apply(os.path.basename)
+        for (species, bird_id, wav_basename), group in saved.groupby(
+            ["species", "bird_id", "_wav_basename"]
         ):
-            mask = (
+            candidates = self.df[
                 (self.df["species"] == species)
                 & (self.df["bird_id"] == bird_id)
-                & (self.df["song_id"] == song_id)
-            )
-            if not mask.any():
+                & (df_basename == wav_basename)
+            ]
+            if candidates.empty:
                 continue
-            idx = int(self.df[mask].index[0])
-            bouts = (
-                group.sort_values("onset")
-                .apply(
-                    lambda r: {
-                        "onset": r["onset"],
-                        "offset": r["offset"],
-                        "wavstart": r["wavstart"],
-                        "wavend": r["wavend"],
-                        "outlier_flag": 0,
-                    },
-                    axis=1,
+            if len(candidates) == 1:
+                bout_groups = [(int(candidates.index[0]), group)]
+            else:
+                # Long recordings are split into multiple chunk rows that all
+                # share the same wav_location, distinguished only by
+                # chunk_num/song_id. Pair chunk rows with saved song_id
+                # groups by rank (both were assigned in chunk order) rather
+                # than by basename alone, so bouts don't all collapse onto
+                # the first chunk.
+                ordered_idx = candidates.sort_values("chunk_num").index.tolist()
+                saved_song_ids = sorted(group["song_id"].unique())
+                bout_groups = [
+                    (int(idx), group[group["song_id"] == sid])
+                    for sid, idx in zip(saved_song_ids, ordered_idx)
+                ]
+            for idx, bout_group in bout_groups:
+                bouts = (
+                    bout_group.sort_values("onset")
+                    .apply(
+                        lambda r: {
+                            "onset": r["onset"],
+                            "offset": r["offset"],
+                            "wavstart": r["wavstart"],
+                            "wavend": r["wavend"],
+                            "outlier_flag": 0,
+                        },
+                        axis=1,
+                    )
+                    .tolist()
                 )
-                .tolist()
-            )
-            self.df.at[idx, "bouts"] = bouts
-            self.current_bouts[idx] = bouts
-            self.exported_idxs.add(idx)
+                self.df.at[idx, "bouts"] = bouts
+                self.current_bouts[idx] = bouts
+                self.exported_idxs.add(idx)
 
     def get_bird_options(self):
         """Return [(label, idx, is_exported), ...] for the bird Spinner."""

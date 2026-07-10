@@ -71,7 +71,7 @@ def create_initial_dataset(root_dir):
     df = df.sort_values("wav_location").reset_index(drop=True)
     df["bird_id"] = df["bird_id"].astype(str)
     df["species"] = df["species"].astype(str)
-    df["song_id"] = df.groupby("species").cumcount()
+    df["song_id"] = df.groupby(["species", "bird_id"]).cumcount()
     return df
 
 
