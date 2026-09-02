@@ -24,7 +24,13 @@ Grab the latest build for your platform from the
 | Platform | File | What to do |
 | --- | --- | --- |
 | Windows | `Chatter.exe` | Download and double-click to run. |
-| macOS | `Chatter.dmg` | Open it and drag **Chatter** into Applications (see note below). |
+| macOS (Apple Silicon) | `Chatter-AppleSilicon.dmg` | Open it and drag **Chatter** into Applications (see note below). |
+| macOS (Intel) | `Chatter-Intel.dmg` | Open it and drag **Chatter** into Applications (see note below). |
+
+**Which Mac do I have?** Click the  menu → **About This Mac**. A "Chip" line
+reading *Apple M1/M2/M3/M4* means Apple Silicon; a "Processor" line reading
+*Intel* means Intel. The two builds are not interchangeable — an Apple Silicon
+build will not open on an Intel Mac.
 
 ### Windows
 
@@ -35,7 +41,8 @@ single-file exe unpacks itself to a temporary folder each time it starts).
 
 ### macOS
 
-Double-click `Chatter.dmg` to open it, then drag **Chatter** onto the
+Download the `.dmg` that matches your Mac's chip (see the table above),
+double-click it to open, then drag **Chatter** onto the
 **Applications** shortcut shown in the window. Open Chatter from your Applications
 folder. The app is **unsigned / not notarized**, so the first launch needs one
 extra step to get past Gatekeeper:

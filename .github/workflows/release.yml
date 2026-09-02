@@ -17,8 +17,32 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # PyInstaller freezes for the architecture it runs on — there is no
+      # cross-compiling here. macOS therefore needs BOTH runners, or the build
+      # will not launch on the other kind of Mac.
+      #
+      # Runner label notes (they churn — re-check before editing):
+      #   macos-15-intel : x86_64. GitHub-hosted Intel macOS, standard/free on
+      #                    public repos. Replaces macos-13, which was retired in
+      #                    Dec 2025. Available until ~Aug 2027; the successor
+      #                    label is macos-26-intel. Deliberately NOT the newest
+      #                    Intel image: building on the older OS keeps the
+      #                    minimum macOS version low, and Intel Macs in the lab
+      #                    are the machines most likely on an older macOS.
+      #   macos-14       : arm64 (Apple Silicon). Pinned rather than
+      #                    macos-latest for the same backward-compat reason.
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            artifact: Chatter-windows
+          - os: macos-15-intel    # Intel (x86_64)
+            artifact: Chatter-macos-intel
+            dmg_name: Chatter-Intel
+            dmg_volume: Chatter (Intel)
+          - os: macos-14          # Apple Silicon (arm64)
+            artifact: Chatter-macos-apple-silicon
+            dmg_name: Chatter-AppleSilicon
+            dmg_volume: Chatter (Apple Silicon)
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -28,6 +52,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
+          # No `architecture:` here on purpose — setup-python defaults to the
+          # runner's native architecture, which is what PyInstaller freezes for.
+          # Pinning x64 would build an Intel app on the arm64 runner.
           python-version: '3.11'
 
       - name: Install dependencies
@@ -69,6 +96,19 @@ jobs:
           KIVY_GL_BACKEND: mock
         run: pyinstaller Chatter.spec --noconfirm
 
+      - name: Verify macOS build architecture
+        if: runner.os == 'macOS'
+        working-directory: chatter_app
+        # Fail loudly if the frozen binary is not the architecture this job is
+        # supposed to produce — a silently arm64-only release is exactly the bug
+        # this matrix exists to prevent.
+        run: |
+          set -e
+          expected=$(uname -m)
+          echo "Runner architecture: $expected"
+          lipo -info dist/Chatter.app/Contents/MacOS/Chatter
+          lipo -info dist/Chatter.app/Contents/MacOS/Chatter | grep -q "$expected"
+
       - name: Package macOS app as a .dmg
         if: runner.os == 'macOS'
         working-directory: chatter_app
@@ -81,14 +121,14 @@ jobs:
           mkdir -p dmg_stage
           ditto dist/Chatter.app "dmg_stage/Chatter.app"
           ln -s /Applications dmg_stage/Applications
-          hdiutil create -volname "Chatter" -srcfolder dmg_stage \
-            -ov -format UDZO dist/Chatter.dmg
+          hdiutil create -volname "${{ matrix.dmg_volume }}" -srcfolder dmg_stage \
+            -ov -format UDZO "dist/${{ matrix.dmg_name }}.dmg"
 
       - name: Upload Windows artifact
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: Chatter-windows
+          name: ${{ matrix.artifact }}
           path: chatter_app/dist/Chatter.exe
           if-no-files-found: error
 
@@ -96,8 +136,8 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: Chatter-macos
-          path: chatter_app/dist/Chatter.dmg
+          name: ${{ matrix.artifact }}
+          path: chatter_app/dist/${{ matrix.dmg_name }}.dmg
           if-no-files-found: error
 
   release:
