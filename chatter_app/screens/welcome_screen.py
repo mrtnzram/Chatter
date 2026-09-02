@@ -19,7 +19,7 @@ from kivy.graphics import Color as GColor, Rectangle as GRect
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
-from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.filechooser import FileChooserListView, FileSystemLocal
 from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
@@ -34,6 +34,24 @@ _screen_dir = os.path.dirname(os.path.abspath(__file__))
 _assets_dir = os.path.join(
     getattr(sys, '_MEIPASS', os.path.dirname(_screen_dir)), 'assets'
 )
+
+
+class _SafeFileSystem(FileSystemLocal):
+    """FileChooser filesystem that never calls into pywin32.
+
+    Kivy's FileSystemLocal.is_hidden() shells out to win32file's
+    GetFileAttributesExW on Windows, and the FileChooser calls it once per
+    entry, unguarded, while listing a directory. That raises on cloud-synced
+    placeholders (Box/OneDrive), network shares and long paths — taking the
+    whole Browse popup down with it — and needs pywin32 present at all, which
+    is not a dependency we ship.
+
+    A dotfile check behaves identically on macOS and is close enough on
+    Windows: at worst a hidden folder stays visible in the picker.
+    """
+
+    def is_hidden(self, fn):
+        return os.path.basename(fn).startswith('.')
 
 
 class WelcomeScreen(Screen):
@@ -227,7 +245,8 @@ class WelcomeScreen(Screen):
         )
         layout.add_widget(hint)
 
-        chooser = FileChooserListView(path=start, dirselect=True)
+        chooser = FileChooserListView(path=start, dirselect=True,
+                                      file_system=_SafeFileSystem())
         layout.add_widget(chooser)
 
         btn_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(10))
