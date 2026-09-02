@@ -1,0 +1,15 @@
+# pip constraints for the Intel (x86_64) macOS build ONLY.
+#
+# numba and llvmlite stopped publishing macOS x86_64 wheels: on macOS the
+# newest releases ship arm64 wheels only. Without these pins pip falls back to
+# building llvmlite from source, which needs a full LLVM toolchain and fails
+# the CI job.
+#
+# These are the last versions that ship cp311 macOS x86_64 wheels. librosa only
+# requires numba>=0.51, so pinning here does not break it. numba 0.62.x
+# requires llvmlite 0.45.x, so the two must move together.
+#
+# Applied via the PIP_CONSTRAINT env var in .github/workflows/release.yml.
+# Not used by the arm64 macOS or Windows builds, which get current versions.
+numba==0.62.1
+llvmlite==0.45.1

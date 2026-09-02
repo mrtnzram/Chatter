@@ -57,6 +57,16 @@ jobs:
           # Pinning x64 would build an Intel app on the arm64 runner.
           python-version: '3.11'
 
+      # numba/llvmlite ship arm64-only wheels on recent macOS releases, so the
+      # Intel job must hold them at the last x86_64-capable versions or pip
+      # tries to compile llvmlite from source and the job fails. See the
+      # constraints file for detail. PIP_CONSTRAINT applies to every pip
+      # install that follows in this job.
+      - name: Constrain numba/llvmlite (Intel macOS only)
+        if: matrix.os == 'macos-15-intel'
+        run: |
+          echo "PIP_CONSTRAINT=$GITHUB_WORKSPACE/chatter_app/constraints-macos-intel.txt" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
