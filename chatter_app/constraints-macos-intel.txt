@@ -1,15 +1,29 @@
 # pip constraints for the Intel (x86_64) macOS build ONLY.
 #
-# numba and llvmlite stopped publishing macOS x86_64 wheels: on macOS the
-# newest releases ship arm64 wheels only. Without these pins pip falls back to
-# building llvmlite from source, which needs a full LLVM toolchain and fails
-# the CI job.
+# Two separate problems are solved here, both specific to Intel macOS.
 #
-# These are the last versions that ship cp311 macOS x86_64 wheels. librosa only
-# requires numba>=0.51, so pinning here does not break it. numba 0.62.x
-# requires llvmlite 0.45.x, so the two must move together.
+# 1. numba / llvmlite
+#    These stopped publishing macOS x86_64 wheels; their recent macOS wheels
+#    are arm64 only. Without these pins pip falls back to building llvmlite
+#    from source, which needs a full LLVM toolchain and fails the CI job.
+#    These are the last versions shipping macOS x86_64 wheels. librosa only
+#    requires numba>=0.51, and numba 0.62.x requires llvmlite 0.45.x, so the
+#    two must move together.
+#
+# 2. numpy / scipy
+#    These publish TWO x86_64 macOS wheels per release: a low
+#    deployment-target build (macosx_10_9 / macosx_10_14) and a macosx_14_0
+#    build. pip picks the highest tag the build machine supports, so on the
+#    macOS 15 runner it silently chose macosx_14_0 and the frozen app refused
+#    to launch on any Intel Mac older than macOS 14 ("the application cannot
+#    be opened"). The workflow force-installs the low-target wheels; these
+#    pins stop the requirements install from pulling the 14.0 ones back in.
+#    Versions are pinned exactly because the workflow downloads these specific
+#    wheels by name.
 #
 # Applied via the PIP_CONSTRAINT env var in .github/workflows/release.yml.
 # Not used by the arm64 macOS or Windows builds, which get current versions.
 numba==0.62.1
 llvmlite==0.45.1
+numpy==2.3.5
+scipy==1.17.1

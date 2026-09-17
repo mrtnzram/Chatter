@@ -39,10 +39,16 @@ jobs:
             artifact: Chatter-macos-intel
             dmg_name: Chatter-Intel
             dmg_volume: Chatter (Intel)
+            # Intel Macs run a wide spread of old macOS versions, so hold the
+            # bundle's minimum down. kivy/numba sit at 10.15, so this has room.
+            max_macos: '12'
           - os: macos-14          # Apple Silicon (arm64)
             artifact: Chatter-macos-apple-silicon
             dmg_name: Chatter-AppleSilicon
             dmg_volume: Chatter (Apple Silicon)
+            # Every Apple Silicon Mac runs macOS 11+, and the arm64 numpy/scipy
+            # wheels currently floor at 14, so this only guards against drift.
+            max_macos: '14'
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -62,10 +68,31 @@ jobs:
       # tries to compile llvmlite from source and the job fails. See the
       # constraints file for detail. PIP_CONSTRAINT applies to every pip
       # install that follows in this job.
-      - name: Constrain numba/llvmlite (Intel macOS only)
+      - name: Constrain dependencies (Intel macOS only)
         if: matrix.os == 'macos-15-intel'
         run: |
           echo "PIP_CONSTRAINT=$GITHUB_WORKSPACE/chatter_app/constraints-macos-intel.txt" >> "$GITHUB_ENV"
+
+      # numpy and scipy each ship two x86_64 macOS wheels: a low
+      # deployment-target build and a macosx_14_0 build. pip prefers the
+      # highest tag the runner supports, so on macOS 15 it picks macosx_14_0
+      # and the frozen app then refuses to launch on any Intel Mac older than
+      # macOS 14 with "the application cannot be opened" — while still building
+      # and passing every other check. Fetch the low-target wheels explicitly
+      # and install them first; the requirements install below then sees them
+      # already satisfied, and the constraints file stops anything upgrading
+      # them back. Verified by the "Verify macOS deployment floor" step.
+      - name: Install low-deployment-target numpy/scipy (Intel macOS only)
+        if: matrix.os == 'macos-15-intel'
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          pip download --only-binary=:all: --no-deps \
+            --platform macosx_10_9_x86_64 --platform macosx_10_14_x86_64 \
+            --python-version 311 --implementation cp \
+            --dest "$RUNNER_TEMP/lowwheels" numpy scipy
+          ls -1 "$RUNNER_TEMP/lowwheels"
+          pip install "$RUNNER_TEMP"/lowwheels/*.whl
 
       - name: Install dependencies
         run: |
@@ -118,6 +145,49 @@ jobs:
           echo "Runner architecture: $expected"
           lipo -info dist/Chatter.app/Contents/MacOS/Chatter
           lipo -info dist/Chatter.app/Contents/MacOS/Chatter | grep -q "$expected"
+
+      # The architecture check above proves the app is x86_64, but an x86_64
+      # app built against a too-new SDK still cannot open on older Macs. This
+      # is the check that would have caught the macOS 14 floor before release.
+      - name: Verify macOS deployment floor
+        if: runner.os == 'macOS'
+        working-directory: chatter_app
+        env:
+          MAX_MACOS: ${{ matrix.max_macos }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess, sys
+
+          limit = int(os.environ["MAX_MACOS"])
+          worst, worst_file = 0, None
+
+          for path in pathlib.Path("dist/Chatter.app").rglob("*"):
+              if not path.is_file() or path.suffix not in (".so", ".dylib"):
+                  continue
+              out = subprocess.run(
+                  ["otool", "-l", str(path)], capture_output=True, text=True
+              ).stdout
+              lines = out.splitlines()
+              for i, line in enumerate(lines):
+                  if "LC_BUILD_VERSION" not in line:
+                      continue
+                  for follow in lines[i : i + 6]:
+                      if "minos" in follow:
+                          major = int(follow.split()[1].split(".")[0])
+                          if major > worst:
+                              worst, worst_file = major, path
+                          break
+                  break
+
+          print(f"Highest minimum macOS in bundle: {worst} ({worst_file})")
+          if worst > limit:
+              print(
+                  f"::error::Bundle requires macOS {worst}, but this job's limit "
+                  f"is {limit}. Users on older macOS will get 'the application "
+                  f"cannot be opened'. Culprit: {worst_file}"
+              )
+              sys.exit(1)
+          PY
 
       - name: Package macOS app as a .dmg
         if: runner.os == 'macOS'
