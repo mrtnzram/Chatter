@@ -1,4 +1,7 @@
-kivy>=2.3.0
+# >=2.2.1 (not >=2.3.0) so the Intel macOS build can pin 2.2.1, whose
+# vendored SDL2 dylibs still target macOS 10.13. Other platforms resolve
+# to the newest release as before. See chatter_app/constraints-macos-intel.txt.
+kivy>=2.2.1
 numpy
 pandas
 librosa

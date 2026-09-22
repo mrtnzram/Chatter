@@ -11,7 +11,7 @@
 # and that check are meant to be read together.
 #
 # Wheel platform tags at the time of writing (cp311, x86_64):
-#   kivy     2.3.0  -> macosx_10_9      (2.3.1 jumped to 10_15)
+#   kivy     2.2.1  -> see note 3 below (the wheel tag is NOT the whole story)
 #   numba    0.60.0 -> macosx_10_9      (0.61 -> 10_14, 0.62 -> 10_15)
 #   llvmlite 0.43.0 -> macosx_10_9      (0.44 -> 10_14, 0.45 -> 10_15)
 #   soxr     0.4.0  -> macosx_10_9      (0.5+ -> 10_14); pulled in by librosa
@@ -32,9 +32,19 @@
 #    the low-target wheels by platform tag; these version pins exist so that
 #    the later `pip install -r requirements` cannot pull the 14_0 ones back in.
 #
+# 3. kivy vendors its own copies of SDL2 and friends inside kivy/.dylibs/,
+#    as EXTENSIONLESS files named "SDL2", "SDL2_ttf", "png" and so on. Those
+#    binaries carry their own deployment targets, which the wheel's platform
+#    tag says nothing about: the 2.3.0 wheel is tagged macosx_10_9 but ships a
+#    libpng built for macOS 12.7, pulled in because its SDL2_ttf links libpng.
+#    2.2.1 does not ship libpng at all and its SDL2 family is built for 10.13.
+#    This is why requirements_kivy.txt asks for kivy>=2.2.1 rather than
+#    >=2.3.0 -- so this pin does not create an unsatisfiable resolution.
+#    Lesson: check the vendored .dylibs, not just the wheel tag.
+#
 # Applied via the PIP_CONSTRAINT env var in .github/workflows/release.yml.
 # Not used by the arm64 macOS or Windows builds, which get current versions.
-kivy==2.3.0
+kivy==2.2.1
 numba==0.60.0
 llvmlite==0.43.0
 soxr==0.4.0
