@@ -1,29 +1,43 @@
 # pip constraints for the Intel (x86_64) macOS build ONLY.
 #
-# Two separate problems are solved here, both specific to Intel macOS.
+# Purpose: keep the frozen app's minimum macOS version at 10.13 (High Sierra),
+# because Intel Macs in the lab run old macOS and the loader refuses to start
+# an app whose binaries demand a newer OS ("the application cannot be opened").
 #
-# 1. numba / llvmlite
-#    These stopped publishing macOS x86_64 wheels; their recent macOS wheels
-#    are arm64 only. Without these pins pip falls back to building llvmlite
-#    from source, which needs a full LLVM toolchain and fails the CI job.
-#    These are the last versions shipping macOS x86_64 wheels. librosa only
-#    requires numba>=0.51, and numba 0.62.x requires llvmlite 0.45.x, so the
-#    two must move together.
+# Every pin below is the newest release whose macOS x86_64 wheel still targets
+# 10.13 or lower. Bumping any of them WILL raise the app's minimum macOS and
+# lock out those machines. The "Verify macOS deployment floor" step in
+# .github/workflows/release.yml fails the build if that happens, so this file
+# and that check are meant to be read together.
 #
-# 2. numpy / scipy
-#    These publish TWO x86_64 macOS wheels per release: a low
-#    deployment-target build (macosx_10_9 / macosx_10_14) and a macosx_14_0
-#    build. pip picks the highest tag the build machine supports, so on the
-#    macOS 15 runner it silently chose macosx_14_0 and the frozen app refused
-#    to launch on any Intel Mac older than macOS 14 ("the application cannot
-#    be opened"). The workflow force-installs the low-target wheels; these
-#    pins stop the requirements install from pulling the 14.0 ones back in.
-#    Versions are pinned exactly because the workflow downloads these specific
-#    wheels by name.
+# Wheel platform tags at the time of writing (cp311, x86_64):
+#   kivy     2.3.0  -> macosx_10_9      (2.3.1 jumped to 10_15)
+#   numba    0.60.0 -> macosx_10_9      (0.61 -> 10_14, 0.62 -> 10_15)
+#   llvmlite 0.43.0 -> macosx_10_9      (0.44 -> 10_14, 0.45 -> 10_15)
+#   soxr     0.4.0  -> macosx_10_9      (0.5+ -> 10_14); pulled in by librosa
+#   cffi     1.17.1 -> macosx_10_9      (2.0 -> 10_13, 2.1 -> 10_15)
+#   numpy    2.0.2  -> macosx_10_9      capped by numba 0.60 (needs numpy<2.1)
+#   scipy    1.15.3 -> macosx_10_13     (1.16+ -> 10_14)
+#
+# Two further notes:
+#
+# 1. numba / llvmlite also stopped publishing macOS x86_64 wheels entirely in
+#    later releases, so without a pin pip tries to build llvmlite from source
+#    and the CI job dies. These pins solve that too.
+#
+# 2. numpy and scipy each publish TWO x86_64 wheels per release: a low
+#    deployment-target one and a macosx_14_0 one. pip prefers the highest tag
+#    the BUILD machine supports, so on the runner it silently picks the 14_0
+#    wheel even with the version pinned. The workflow therefore force-downloads
+#    the low-target wheels by platform tag; these version pins exist so that
+#    the later `pip install -r requirements` cannot pull the 14_0 ones back in.
 #
 # Applied via the PIP_CONSTRAINT env var in .github/workflows/release.yml.
 # Not used by the arm64 macOS or Windows builds, which get current versions.
-numba==0.62.1
-llvmlite==0.45.1
-numpy==2.3.5
-scipy==1.17.1
+kivy==2.3.0
+numba==0.60.0
+llvmlite==0.43.0
+soxr==0.4.0
+cffi==1.17.1
+numpy==2.0.2
+scipy==1.15.3

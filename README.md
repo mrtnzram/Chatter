@@ -24,13 +24,18 @@ Grab the latest build for your platform from the
 | Platform | File | What to do |
 | --- | --- | --- |
 | Windows | `Chatter.exe` | Download and double-click to run. |
-| macOS (Apple Silicon) | `Chatter-AppleSilicon.dmg` | Open it and drag **Chatter** into Applications (see note below). |
-| macOS (Intel) | `Chatter-Intel.dmg` | Open it and drag **Chatter** into Applications (see note below). |
+| macOS (Apple Silicon) | `Chatter-AppleSilicon.dmg` | Open it and drag **Chatter** into Applications (see note below). Needs macOS 14 Sonoma or newer. |
+| macOS (Intel) | `Chatter-Intel.dmg` | Open it and drag **Chatter** into Applications (see note below). Needs macOS 10.13 High Sierra or newer. |
 
 **Which Mac do I have?** Click the  menu → **About This Mac**. A "Chip" line
 reading *Apple M1/M2/M3/M4* means Apple Silicon; a "Processor" line reading
 *Intel* means Intel. The two builds are not interchangeable — an Apple Silicon
 build will not open on an Intel Mac.
+
+**"The application cannot be opened."** That message usually means one of two
+things: you downloaded the build for the wrong chip, or your macOS is older
+than the build requires (see the table above). Check the  menu →
+**About This Mac** for both your chip and your macOS version.
 
 ### Windows
 
@@ -49,7 +54,8 @@ extra step to get past Gatekeeper:
 
 1. **Right-click (or Control-click) `Chatter` → Open**, then click **Open** in
    the dialog that appears.
-2. If macOS still blocks it, go to **System Settings → Privacy & Security**, scroll
+2. If macOS still blocks it, open **System Settings → Privacy & Security**
+   (**System Preferences → Security & Privacy** on macOS 12 and older), scroll
    to the Security section, and click **Open Anyway** next to the Chatter message,
    then launch the app again.
 
